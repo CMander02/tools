@@ -1,0 +1,39 @@
+{
+  "name": "xiaoyuzhou-fetch-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for fetching podcast & episode data from 小宇宙 (Xiaoyuzhou FM)",
+  "type": "module",
+  "main": "dist/mcp.js",
+  "bin": {
+    "xiaoyuzhou-fetch-mcp": "dist/mcp.js",
+    "xiaoyuzhou-fetch": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/mcp.js",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "xiaoyuzhou",
+    "podcast",
+    "model-context-protocol"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0"
+  }
+}
