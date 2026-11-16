@@ -1,11 +1,11 @@
-# Tools
+# Skills
 
 Personal Claude Code skills and MCP servers — verified and ready to use.
 
 ## Structure
 
 ```
-Tools/
+skills/
 ├── skills/
 │   ├── web/
 │   │   ├── omni-fetch.md       # 统一抓取（微信/小宇宙/B站/小红书/知乎）
@@ -27,7 +27,7 @@ Tools/
 ## Install
 
 ```bash
-git clone https://github.com/<you>/Tools ~/Tools
+git clone https://github.com/CMander02/skills.git ~/Tools
 TOOLS_ROOT=~/Tools
 ```
 
