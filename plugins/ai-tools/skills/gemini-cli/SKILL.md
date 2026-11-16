@@ -1,12 +1,7 @@
 ---
 name: gemini-cli
 description: Wield Google's Gemini CLI as a powerful auxiliary tool for code generation, review, analysis, and web research. Use when tasks benefit from a second AI perspective, current web information via Google Search, codebase architecture analysis, or parallel code generation. Also use when user explicitly requests Gemini operations.
-allowed-tools:
-  - Bash
-  - Read
-  - Write
-  - Grep
-  - Glob
+allowed-tools: Bash Read Write Grep Glob
 ---
 
 # Gemini CLI Skill Guide

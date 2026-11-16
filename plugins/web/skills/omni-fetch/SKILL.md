@@ -17,10 +17,7 @@ description: |
   优先级：若用户只需单一平台，可继续使用对应专属 skill；
   若涉及多平台或用户直接扔链接，用此 skill。
 
-  工具位置：<TOOLS_ROOT>/skills/web/omni-fetch/fetch.ts
-allowed-tools:
-  - Bash
-  - Write
+allowed-tools: Bash Write
 ---
 
 # omni-fetch — 统一内容抓取
@@ -30,17 +27,18 @@ allowed-tools:
 ## 工具位置
 
 ```
-<TOOLS_ROOT>/skills/web/omni-fetch/
+<WEB_TOOLS>/omni-fetch/
 ├── fetch.ts        # 单文件，含全部平台逻辑
 └── package.json    # 依赖（tsx, typescript；playwright 可选）
 ```
 
-`<TOOLS_ROOT>` 是本 repo 的克隆路径，例如 `~/Tools`。
+`<WEB_TOOLS>` 是相对于本 `SKILL.md` 所在目录的 `../../tools`。执行命令前将占位符替换为工具目录的绝对路径。
 
 ## 用法
 
 ```bash
-cd <TOOLS_ROOT>/skills/web/omni-fetch
+cd "<WEB_TOOLS>/omni-fetch"
+npm install    # 首次使用
 
 # 抓取文字内容（Markdown 输出到 stdout）
 npx tsx fetch.ts "<url>"
@@ -98,8 +96,8 @@ npx tsx fetch.ts "https://zhuanlan.zhihu.com/p/xxx" --mode headless
 
 ### 知乎专栏
 - 依赖 Playwright + 已保存的登录 session
-- Session 目录：`<TOOLS_ROOT>/mcps/zhihu-fetch/zhihu_profile/`
-- 首次使用需先运行：`npx tsx <TOOLS_ROOT>/mcps/zhihu-fetch/auth.ts login`
+- Session 目录：`<WEB_TOOLS>/zhihu-fetch/zhihu_profile/`
+- 首次使用在 `<WEB_TOOLS>/zhihu-fetch/` 下运行 `npm install`，再运行 `npx tsx auth.ts login`
 
 ## 工作流程
 

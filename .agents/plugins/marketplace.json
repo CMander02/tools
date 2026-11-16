@@ -1,0 +1,29 @@
+{
+  "name": "cmander-skills",
+  "interface": {
+    "displayName": "CMander Skills"
+  },
+  "plugins": [
+    {
+      "name": "general",
+      "source": {
+        "source": "local",
+        "path": "./plugins/general"
+      }
+    },
+    {
+      "name": "ai-tools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ai-tools"
+      }
+    },
+    {
+      "name": "web",
+      "source": {
+        "source": "local",
+        "path": "./plugins/web"
+      }
+    }
+  ]
+}

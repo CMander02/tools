@@ -1,12 +1,7 @@
 ---
 name: roundtable
 description: Launch a multi-AI roundtable discussion between Claude, Codex, and Gemini. Use when the user wants multiple AI perspectives on a problem — bug analysis, code review, architecture decisions, or any task benefiting from collaborative AI discussion.
-allowed-tools:
-  - Bash
-  - Read
-  - Write
-  - Grep
-  - Glob
+allowed-tools: Bash Read Write Grep Glob
 ---
 
 # Roundtable Skill Guide

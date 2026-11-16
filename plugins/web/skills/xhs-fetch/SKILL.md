@@ -5,7 +5,6 @@ description: |
   Trigger when: (1) User provides a Xiaohongshu link, short link, or share text and asks to download images/videos
   (2) User says "download xhs", "save xhs images", "fetch xiaohongshu", "xhs download"
   (3) User pastes a URL containing xiaohongshu.com or xhslink.com
-  Prerequisite: xhs-fetch-mcp tool is built at <TOOLS_ROOT>/mcps/xhs-fetch-mcp/dist/cli.js
 ---
 
 # Xiaohongshu Image/Video Downloader
@@ -15,7 +14,7 @@ Extract and download **uncompressed, watermark-free** original images or videos 
 ## Tool Location
 
 ```
-<TOOLS_ROOT>/mcps/xhs-fetch-mcp/
+<WEB_TOOLS>/xhs-fetch-mcp/
 ├── src/
 │   ├── cli.ts
 │   ├── xhs-extract.ts
@@ -25,12 +24,12 @@ Extract and download **uncompressed, watermark-free** original images or videos 
 └── tsconfig.json
 ```
 
-`<TOOLS_ROOT>` 是本 repo 的克隆路径，例如 `~/Tools`。
+`<WEB_TOOLS>` 是相对于本 `SKILL.md` 所在目录的 `../../tools`。执行命令前将占位符替换为工具目录的绝对路径。
 
 ## Setup (first time)
 
 ```bash
-cd <TOOLS_ROOT>/mcps/xhs-fetch-mcp
+cd "<WEB_TOOLS>/xhs-fetch-mcp"
 npm install && npm run build
 ```
 
@@ -45,7 +44,7 @@ npm install && npm run build
 ### Download an image post
 
 ```bash
-node <TOOLS_ROOT>/mcps/xhs-fetch-mcp/dist/cli.js "<xhs link or share text>" --output <save directory>
+node "<WEB_TOOLS>/xhs-fetch-mcp/dist/cli.js" "<xhs link or share text>" --output <save directory>
 ```
 
 ### Download a video post
@@ -53,7 +52,7 @@ node <TOOLS_ROOT>/mcps/xhs-fetch-mcp/dist/cli.js "<xhs link or share text>" --ou
 Same command — the tool auto-detects the post type and downloads the video:
 
 ```bash
-node <TOOLS_ROOT>/mcps/xhs-fetch-mcp/dist/cli.js "<video post link>" --output <save directory>
+node "<WEB_TOOLS>/xhs-fetch-mcp/dist/cli.js" "<video post link>" --output <save directory>
 ```
 
 ## Workflow
@@ -67,7 +66,7 @@ Extract from the user's message:
 ### 2. Execute download
 
 ```bash
-node <TOOLS_ROOT>/mcps/xhs-fetch-mcp/dist/cli.js "<link or share text from user>" --output <target directory>
+node "<WEB_TOOLS>/xhs-fetch-mcp/dist/cli.js" "<link or share text from user>" --output <target directory>
 ```
 
 ### 3. Report results
@@ -104,7 +103,7 @@ User: "Download this 12 【Post Title - Author | 小红书】 https://www.xiaoho
 
 Execute:
 ```bash
-node <TOOLS_ROOT>/mcps/xhs-fetch-mcp/dist/cli.js "12 【Post Title - Author | 小红书】 https://www.xiaohongshu.com/discovery/item/abc123def456?xsec_token=TOKEN..." --output ./downloads
+node "<WEB_TOOLS>/xhs-fetch-mcp/dist/cli.js" "12 【Post Title - Author | 小红书】 https://www.xiaohongshu.com/discovery/item/abc123def456?xsec_token=TOKEN..." --output ./downloads
 ```
 
 ### User provides a short link
@@ -113,5 +112,5 @@ User: "Download https://xhslink.com/a1B2cD"
 
 Execute:
 ```bash
-node <TOOLS_ROOT>/mcps/xhs-fetch-mcp/dist/cli.js "https://xhslink.com/a1B2cD" --output ./downloads
+node "<WEB_TOOLS>/xhs-fetch-mcp/dist/cli.js" "https://xhslink.com/a1B2cD" --output ./downloads
 ```

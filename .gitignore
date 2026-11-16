@@ -3,3 +3,6 @@ dist/
 zhihu_profile/
 *.log
 .DS_Store
+
+# Browser login data
+plugins/web/tools/zhihu-fetch/cookies.json

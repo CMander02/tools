@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "ai-tools",
+  "version": "0.1.0",
+  "description": "Use Codex CLI, Gemini CLI, and a roundtable workflow."
+}

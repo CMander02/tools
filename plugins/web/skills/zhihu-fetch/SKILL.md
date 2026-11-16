@@ -1,10 +1,7 @@
 ---
 name: zhihu-fetch
 description: 抓取知乎专栏文章（zhuanlan.zhihu.com/p/...）的完整内容并导出为 Obsidian Markdown 文件。使用场景：(1) 用户提供知乎专栏链接要求保存或导出 (2) 用户说"抓取知乎"、"保存知乎文章"、"导出知乎到 Obsidian" (3) 需要获取文章元数据（作者UUID、发布时间、互动量、评论区）
-allowed-tools:
-  - Bash
-  - Read
-  - Write
+allowed-tools: Bash Read Write
 ---
 
 # Zhihu Fetch Skill
@@ -14,19 +11,19 @@ allowed-tools:
 ## 工具位置
 
 ```
-<TOOLS_ROOT>/mcps/zhihu-fetch/
+<WEB_TOOLS>/zhihu-fetch/
 ├── fetch.ts        # 主抓取脚本
 ├── auth.ts         # Session 管理
 ├── package.json    # npm 依赖（playwright, tsx, typescript）
 └── zhihu_profile/  # 浏览器持久化 profile（登录后自动生成，不入 git）
 ```
 
-`<TOOLS_ROOT>` 是本 repo 的克隆路径，例如 `~/Tools`。
+`<WEB_TOOLS>` 是相对于本 `SKILL.md` 所在目录的 `../../tools`。执行命令前将占位符替换为工具目录的绝对路径。
 
 ## Setup (first time)
 
 ```bash
-cd <TOOLS_ROOT>/mcps/zhihu-fetch
+cd "<WEB_TOOLS>/zhihu-fetch"
 npm install
 # 打开浏览器手动登录知乎，关闭窗口后自动保存 session
 npx tsx auth.ts login
@@ -35,7 +32,7 @@ npx tsx auth.ts login
 ## 抓取文章
 
 ```bash
-cd <TOOLS_ROOT>/mcps/zhihu-fetch
+cd "<WEB_TOOLS>/zhihu-fetch"
 
 # 抓取并输出到 output.md（Windows 自动选择 gui 模式）
 npx tsx fetch.ts https://zhuanlan.zhihu.com/p/<ID>
@@ -53,7 +50,7 @@ npx tsx fetch.ts <url> --mode headless
 ## Session 管理（首次使用 / 定期维护）
 
 ```bash
-cd <TOOLS_ROOT>/mcps/zhihu-fetch
+cd "<WEB_TOOLS>/zhihu-fetch"
 
 # 首次：打开浏览器手动登录知乎，关闭窗口后自动保存 session
 npx tsx auth.ts login

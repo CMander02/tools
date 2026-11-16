@@ -7,10 +7,7 @@ description: |
   (2) User says "抓取小宇宙", "获取小宇宙播客信息", "保存小宇宙节目", "fetch xiaoyuzhou"
   (3) User pastes a URL containing xiaoyuzhoufm.com/podcast/ or xiaoyuzhoufm.com/episode/
   Output: Obsidian-flavored Markdown with frontmatter, all channel/episode fields, host info, episode list, and media URLs.
-  Prerequisite: Tool built at C:/zychen/AIGC/Agent/MCPs/xiaoyuzhou-fetch-mcp/dist/cli.js
-allowed-tools:
-  - Bash
-  - Write
+allowed-tools: Bash Write
 ---
 
 # 小宇宙 (Xiaoyuzhou FM) Fetcher
@@ -19,8 +16,10 @@ Fetch complete podcast channel or episode data from 小宇宙 and export as Obsi
 
 ## Tool Location
 
+Resolve `<WEB_TOOLS>` to the absolute path of `../../tools` from the directory containing this `SKILL.md`. Build the CLI once with `npm install` and `npm run build` in `<WEB_TOOLS>/xiaoyuzhou-fetch-mcp`.
+
 ```
-C:/zychen/AIGC/Agent/MCPs/xiaoyuzhou-fetch-mcp/dist/cli.js
+<WEB_TOOLS>/xiaoyuzhou-fetch-mcp/dist/cli.js
 ```
 
 ## Supported URL Formats
@@ -33,19 +32,19 @@ C:/zychen/AIGC/Agent/MCPs/xiaoyuzhou-fetch-mcp/dist/cli.js
 ### Print Markdown to stdout
 
 ```bash
-node C:/zychen/AIGC/Agent/MCPs/xiaoyuzhou-fetch-mcp/dist/cli.js "<url>"
+node "<WEB_TOOLS>/xiaoyuzhou-fetch-mcp/dist/cli.js" "<url>"
 ```
 
 ### Save to a directory
 
 ```bash
-node C:/zychen/AIGC/Agent/MCPs/xiaoyuzhou-fetch-mcp/dist/cli.js "<url>" --output <save-dir>
+node "<WEB_TOOLS>/xiaoyuzhou-fetch-mcp/dist/cli.js" "<url>" --output <save-dir>
 ```
 
 ### Get raw JSON
 
 ```bash
-node C:/zychen/AIGC/Agent/MCPs/xiaoyuzhou-fetch-mcp/dist/cli.js "<url>" --json
+node "<WEB_TOOLS>/xiaoyuzhou-fetch-mcp/dist/cli.js" "<url>" --json
 ```
 
 ## Data Extracted
@@ -78,7 +77,7 @@ Extract from the user's message:
 ### 2. Execute fetch
 
 ```bash
-node C:/zychen/AIGC/Agent/MCPs/xiaoyuzhou-fetch-mcp/dist/cli.js "<url>" --output <dir>
+node "<WEB_TOOLS>/xiaoyuzhou-fetch-mcp/dist/cli.js" "<url>" --output <dir>
 ```
 
 If no output dir is specified, capture stdout and show in chat.
@@ -104,7 +103,7 @@ If saved to file, tell the user the file path.
 User: "抓取这个小宇宙播客 https://www.xiaoyuzhoufm.com/podcast/670f3da40d2f24f28978736f"
 
 ```bash
-node C:/zychen/AIGC/Agent/MCPs/xiaoyuzhou-fetch-mcp/dist/cli.js "https://www.xiaoyuzhoufm.com/podcast/670f3da40d2f24f28978736f" --output ./notes
+node "<WEB_TOOLS>/xiaoyuzhou-fetch-mcp/dist/cli.js" "https://www.xiaoyuzhoufm.com/podcast/670f3da40d2f24f28978736f" --output ./notes
 ```
 
 ### Fetch a single episode
@@ -112,5 +111,5 @@ node C:/zychen/AIGC/Agent/MCPs/xiaoyuzhou-fetch-mcp/dist/cli.js "https://www.xia
 User: "获取这期节目的信息 https://www.xiaoyuzhoufm.com/episode/6a092b5b1b7bd50295493b6c"
 
 ```bash
-node C:/zychen/AIGC/Agent/MCPs/xiaoyuzhou-fetch-mcp/dist/cli.js "https://www.xiaoyuzhoufm.com/episode/6a092b5b1b7bd50295493b6c"
+node "<WEB_TOOLS>/xiaoyuzhou-fetch-mcp/dist/cli.js" "https://www.xiaoyuzhoufm.com/episode/6a092b5b1b7bd50295493b6c"
 ```
