@@ -1,27 +1,27 @@
 # Skills
 
-个人 Codex skills 仓库。插件可按需安装，源码通过 Git 在设备间同步。
+个人 Agent skills 与插件仓库（同时支持 Codex 与 Antigravity）。插件可按需整包安装，源码通过 Git 在设备间同步。
 
 ## 插件
 
 | 插件 | Skills |
 | --- | --- |
-| [general](plugins/general) | `plain-rigorous-writing`（说人话） |
+| [general](plugins/general) | `plain-rigorous-writing`（说人话）、`visualization`（数据与架构可视化） |
 | [ai-tools](plugins/ai-tools) | `codex`、`gemini-cli`、`roundtable` |
 | [web](plugins/web) | `omni-fetch`、`web-parse`、`xhs-fetch`、`xiaoyuzhou-fetch`、`zhihu-fetch` |
 
-`general` 收录跨项目、跨领域使用的技能，例如日常表达与润色。
+`general` 收录跨项目、跨领域使用的技能，例如日常表达润色与图表可视化。
 
 ## 安装
 
-先安装 Codex CLI，确认 `codex` 在 PATH 中，再克隆仓库。
+克隆仓库并进入根目录：
 
 ```bash
 git clone https://github.com/CMander02/skills.git
 cd skills
 ```
 
-任选一种命令。把 `general` 改成所需的插件名即可。
+任选一种命令，把 `general` 改成所需的插件名（`general`、`ai-tools` 或 `web`）。脚本默认自动检测本机已存在的 Codex CLI 与 Antigravity（`~/.gemini/config`）并同步安装到两端；也可通过 `--target codex` 或 `--target antigravity` 仅安装到指定客户端：
 
 ```text
 python3 setup-service/install.py general
@@ -29,7 +29,7 @@ bash setup-service/install.sh general
 pwsh -File setup-service/install.ps1 general
 ```
 
-在 Windows 上可以用 `py -3 setup-service/install.py general` 启动 Python。脚本会把当前检出登记为 `cmander-skills` marketplace，并安装指定插件。安装完成后开启新的 Codex 会话。
+在 Windows 上可用 `py -3 setup-service/install.py general` 启动 Python。脚本会将当前检出登记为 Codex 的 `cmander-skills` 市场并安装 `<plugin>@cmander-skills`，同时将插件包同步至 Antigravity 的 `~/.gemini/config/plugins/<plugin>/`。
 
 ## 更新
 

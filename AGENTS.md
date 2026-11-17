@@ -2,10 +2,10 @@
 
 ## 目录
 
-- `plugins/general/` 收录跨项目和跨领域复用的 skills。`plain-rigorous-writing` 在这里。
+- `plugins/general/` 收录跨项目和跨领域复用的 skills。`plain-rigorous-writing` 与 `visualization` 在这里。
 - `plugins/ai-tools/` 收录调用其他 AI 工具和组织多工具协作的 skills。
 - `plugins/web/` 收录网页内容提取和媒体下载的 skills。配套程序位于 `plugins/web/tools/`。
-- `setup-service/` 提供 Python、Bash 和 PowerShell 安装入口。三个入口均从当前检出安装一个指定插件。
+- `setup-service/` 提供 Python、Bash 和 PowerShell 安装入口。三个入口均支持 `--target all|codex|antigravity`（默认 `all`），从当前检出向 Codex 和 Antigravity 安装指定插件。
 - `.agents/plugins/marketplace.json` 登记 Codex 可安装的插件。市场名为 `cmander-skills`。
 
 ## 修改约定
