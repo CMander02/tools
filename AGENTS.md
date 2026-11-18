@@ -6,6 +6,7 @@
 - `plugins/ai-tools/` 收录调用其他 AI 工具和组织多工具协作的 skills。
 - `plugins/web/` 收录网页内容提取和媒体下载的 skills。配套程序位于 `plugins/web/tools/`。
 - `setup-service/` 提供 Python、Bash 和 PowerShell 安装入口。三个入口均支持 `--target all|codex|antigravity`（默认 `all`），从当前检出向 Codex 和 Antigravity 安装指定插件。
+- `tampermonkey/` 收录浏览器端运行的 Tampermonkey 脚本（`*.user.js`）。
 - `.agents/plugins/marketplace.json` 登记 Codex 可安装的插件。市场名为 `cmander-skills`。
 
 ## 修改约定
@@ -14,6 +15,7 @@
 - 将 skill 专用的参考文档放在对应 skill 的 `references/`。引用配套文件时，使用相对于 skill 目录或插件目录的路径。检查插件安装后的副本能找到这些文件。
 - 新增或移动插件时，同步核对插件的 `plugin.json`、marketplace 条目和 README。新增或移动 skill 时，更新 README 的插件清单。
 - 修改安装流程时，三个入口应接受相同的插件名，并在 Codex 命令失败时返回非零退出码。
+- 将 Tampermonkey 脚本放在 `tampermonkey/`，文件以 `.user.js` 结尾，并在 `==UserScript==` 元信息块中写明 `@name`、`@namespace`、`@version`、`@match` 与 `@grant` 字段。
 - 将凭据、浏览器会话、个人路径、依赖目录和构建产物留在本机。
 
 ## 验证

@@ -1,6 +1,6 @@
-# Skills
+# Tools
 
-个人 Agent skills 与插件仓库（同时支持 Codex 与 Antigravity）。插件可按需整包安装，源码通过 Git 在设备间同步。
+个人工具仓库，收录 Agent 插件（同时支持 Codex 与 Antigravity）与 Tampermonkey 脚本。插件可按需整包安装，源码通过 Git 在设备间同步。
 
 ## 插件
 
@@ -17,8 +17,8 @@
 克隆仓库并进入根目录：
 
 ```bash
-git clone https://github.com/CMander02/skills.git
-cd skills
+git clone https://github.com/CMander02/tools.git
+cd tools
 ```
 
 任选一种命令，把 `general` 改成所需的插件名（`general`、`ai-tools` 或 `web`）。脚本默认自动检测本机已存在的 Codex CLI 与 Antigravity（`~/.gemini/config`）并同步安装到两端；也可通过 `--target codex` 或 `--target antigravity` 仅安装到指定客户端：
@@ -43,19 +43,30 @@ git pull --ff-only
 
 如果只想用一个 skill，也可以在 `~/.agents/skills/` 下为对应目录创建软链接。例如，将仓库里的 `plugins/general/skills/plain-rigorous-writing/` 链接为 `~/.agents/skills/plain-rigorous-writing`。拉取后，软链接会直接指向更新后的文件。
 
+## Tampermonkey 脚本
+
+| 名称 | 文件 | 功能说明 |
+| --- | --- | --- |
+| 聚合媒体下载 | [media-downloader.user.js](tampermonkey/media-downloader.user.js) | 在 X、B 站动态与小红书笔记中下载图片、视频、动图及实况照片，支持分站目录、命名模板与图片 XMP 元数据 |
+
+浏览器端脚本统一存放在 [tampermonkey](tampermonkey) 目录，目录约定与安装步骤见 [tampermonkey/README.md](tampermonkey/README.md)。
+
 ## 目录
 
 ```text
-skills/
+tools/
 ├── .agents/plugins/marketplace.json
 ├── plugins/
 │   ├── ai-tools/
 │   ├── general/
 │   └── web/
-└── setup-service/
-    ├── install.py
-    ├── install.sh
-    └── install.ps1
+├── setup-service/
+│   ├── install.py
+│   ├── install.sh
+│   └── install.ps1
+└── tampermonkey/
+    ├── README.md
+    └── media-downloader.user.js
 ```
 
 每个插件有自己的 `plugin.json`。每个 skill 的入口位于插件目录中的 `skills/<skill-name>/SKILL.md`。仓库维护说明见 [AGENTS.md](AGENTS.md)。
@@ -74,5 +85,5 @@ skills/
 小红书和小宇宙工具也可以作为独立的 MCP server 运行。构建后，Codex 可用以下命令注册小宇宙 MCP。将路径换成实际检出的绝对路径。
 
 ```bash
-codex mcp add xiaoyuzhou-fetch -- node "/path/to/skills/plugins/web/tools/xiaoyuzhou-fetch-mcp/dist/mcp.js"
+codex mcp add xiaoyuzhou-fetch -- node "/path/to/tools/plugins/web/tools/xiaoyuzhou-fetch-mcp/dist/mcp.js"
 ```
