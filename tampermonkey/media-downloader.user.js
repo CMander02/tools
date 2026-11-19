@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         聚合媒体下载
 // @namespace    https://github.com/CMander02/tools
-// @version      1.1.4
+// @version      1.2.0
 // @description  在 X、B 站动态和小红书笔记中下载媒体，支持各站目录、命名模板和图片元数据。
 // @homepageURL  https://github.com/CMander02/tools/tree/main/tampermonkey
 // @downloadURL  https://raw.githubusercontent.com/CMander02/tools/main/tampermonkey/media-downloader.user.js
@@ -671,7 +671,8 @@
   }
 
   function filePath(values, settings) {
-    const folder = settings.folder.split('/').filter(Boolean).map(part => safePart(render(part, values, settings.missing, true), 100))
+    const template = settings.destination === 'directory' ? '' : settings.folder;
+    const folder = template.split('/').filter(Boolean).map(part => safePart(render(part, values, settings.missing, true), 100))
       .filter(Boolean).join('/');
     const output = render(settings.filename, values, settings.missing, true);
     const suffix = '.' + values.ext;
@@ -1081,6 +1082,12 @@
       '.xmd-dialog::backdrop{background:rgba(0,0,0,.56)}',
       '.xmd-dialog form{margin:0;padding:20px 22px}',
       '.xmd-dialog h2{font-size:21px;margin:0 0 14px}',
+      '.xmd-dialog header{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 22px;background:#fff;border-bottom:1px solid #cfd9de}',
+      '.xmd-dark header{background:#15202b;border-color:#536471}',
+      '.xmd-dialog header h2{font-size:18px;margin:0}',
+      '.xmd-dialog header button{flex:none}',
+      '.xmd-dialog .xmd-formats{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}',
+      '.xmd-formats code{font-size:12px;font-weight:700;padding:2px 7px;border:1px solid #8899a6;border-radius:5px}',
       '.xmd-dialog fieldset{border:1px solid #cfd9de;border-radius:10px;padding:10px 12px;margin:0 0 14px;min-width:0}',
       '.xmd-dark fieldset{border-color:#536471}',
       '.xmd-dialog legend{padding:0 5px;font-weight:700}',
@@ -1353,13 +1360,19 @@
     if (settingsDialog?.open) return;
     ensureStyles();
     const settings = options();
+    let selectedFolder = directory;
     const dialog = element('dialog');
     dialog.className = 'xmd-dialog' + (darkMode() ? ' xmd-dark' : '');
     dialog.setAttribute('aria-labelledby', 'xmd-settings-title');
     const form = element('form');
     const heading = element('h2', menu);
     heading.id = 'xmd-settings-title';
-    form.append(heading);
+    const header = element('header');
+    const close = element('button', '关闭 ✕');
+    close.type = 'button';
+    close.setAttribute('aria-label', '关闭设置，不保存修改');
+    close.addEventListener('click', () => dialog.close());
+    header.append(heading, close);
     const controls = {};
 
     function field(parent, key, labelText, type = 'text', choices) {
@@ -1394,58 +1407,96 @@
     const destination = field(locationGroup, 'destination', '下载方式', 'select', [
       ['browser', 'Chrome 下载目录'], ['directory', '手动选择本地文件夹'],
     ]);
-    const folder = field(locationGroup, 'folder', '子文件夹模板（留空则使用所选下载目录）');
+    const folder = field(locationGroup, 'folder', 'Chrome 子文件夹模板（相对于 Chrome 下载目录）');
     folder.placeholder = site === 'x' ? 'X/%handle%' : defaults.folder + '/%author%';
     folder.maxLength = 320;
     field(locationGroup, 'saveAs', '每个文件下载时询问保存位置', 'checkbox');
     const conflict = field(locationGroup, 'conflict', '文件名重复时', 'select', [
       ['uniquify', '自动追加序号'], ['overwrite', '覆盖已有文件'], ['prompt', '由 Chrome 询问'],
     ]);
-    const locationHelp = element('small', '子文件夹路径用 / 分隔，例如 X/%handle%。Chrome 模式的子文件夹需要 Tampermonkey 浏览器 API 下载模式。');
+    const locationHelp = element('small');
+    const downloadMode = element('small');
+    const browserApi = GM_info.downloadMode === 'browser';
+    downloadMode.textContent = browserApi ? 'Tampermonkey 下载模式：浏览器 API。'
+      : 'Tampermonkey 尚未启用浏览器 API。子文件夹、询问保存位置和重名处理需要此模式。请在 Tampermonkey 管理面板 → 设置 → 下载 BETA 中选择浏览器 API 并保存。';
     locationGroup.append(locationHelp);
     const pick = element('button', '选择本地文件夹…');
     pick.type = 'button';
     const chosen = element('small');
     const updateDirectory = () => {
       const custom = destination.value === 'directory';
+      folder.disabled = custom;
+      controls.folder.label.hidden = custom;
       controls.saveAs.label.hidden = custom;
+      downloadMode.hidden = custom;
       pick.hidden = chosen.hidden = !custom;
       conflict.querySelector('option[value="prompt"]').disabled = custom;
       if (custom && conflict.value === 'prompt') conflict.value = 'uniquify';
-      chosen.textContent = directory ? '当前已选：' + directory.name : '尚未选择文件夹。刷新页面后需重新选择。';
+      chosen.textContent = selectedFolder ? '当前已选：' + selectedFolder.name + '（最终保存目录）'
+        : '尚未选择文件夹。刷新页面后需重新选择。';
+      locationHelp.textContent = custom
+        ? '文件直接保存到所选文件夹。Chrome 子文件夹模板在此方式下不生效。例如选择 Downloads/Chrome/X，文件就保存在该文件夹中。'
+        : '子文件夹路径用 / 分隔。Chrome/X 表示「Chrome 下载目录/Chrome/X」。请在 chrome://settings/downloads 核对 Chrome 下载目录，避免重复填写已有的目录层级。留空则直接使用 Chrome 下载目录。';
     };
-    destination.addEventListener('change', updateDirectory);
+    destination.addEventListener('change', () => { updateDirectory(); refreshPreview(); });
     pick.addEventListener('click', async () => {
       try {
         if (typeof page.showDirectoryPicker !== 'function') throw new Error('当前浏览器不支持本地文件夹选择');
-        directory = await page.showDirectoryPicker({ id: 'media-downloader', mode: 'readwrite', startIn: 'downloads' });
+        selectedFolder = await page.showDirectoryPicker({ id: 'media-downloader', mode: 'readwrite', startIn: 'downloads' });
         updateDirectory();
+        refreshPreview();
       } catch (error) {
         if (error.name !== 'AbortError') chosen.textContent = '无法选择文件夹：' + error.message;
       }
     });
-    locationGroup.append(pick, chosen);
+    locationGroup.append(downloadMode, pick, chosen);
     updateDirectory();
 
     const media = optionGroup(form, '下载范围');
-    field(media, 'photo', '图片', 'checkbox');
-    field(media, 'original', '优先下载平台提供的原尺寸图片', 'checkbox');
+    media.append(element('small', '格式由平台提供的媒体决定，脚本保留实际格式，不转换文件。'));
+    function mediaGroup(title, key, label, formats) {
+      const group = optionGroup(media, title);
+      field(group, key, label, 'checkbox');
+      const badges = element('div');
+      badges.className = 'xmd-formats';
+      badges.setAttribute('aria-label', title + '常见格式');
+      badges.append(...formats.map(format => element('code', format)));
+      group.append(badges);
+      return group;
+    }
+    const photos = mediaGroup('图片', 'photo', '下载图片', ['JPG / JPEG', 'PNG', 'WebP', 'AVIF', 'GIF']);
+    field(photos, 'original', '优先下载平台提供的原尺寸图片', 'checkbox');
+    const mode = field(photos, 'metadataMode', '图片元数据', 'select', [
+      ['auto', '图片写入 XMP，无法内嵌时保存 JSON'],
+      ['both', '图片写入 XMP，同时保存图片 JSON'],
+      ['json', '仅保存图片 JSON'], ['off', '关闭图片元数据'],
+    ]);
     if (site !== 'bili') {
-      field(media, 'video', '视频', 'checkbox');
-      if (site === 'x') field(media, 'gif', '动图（X 提供的 MP4）', 'checkbox');
-      if (site === 'xhs') field(media, 'live', '实况照片的动态部分', 'checkbox');
-      field(media, 'quality', '视频画质', 'select', [
+      const videos = mediaGroup('视频', 'video', '下载视频', ['MP4']);
+      if (site === 'x') {
+        const gifs = mediaGroup('动图', 'gif', '下载 X 动图', ['MP4']);
+        gifs.append(element('small', 'X 动图保存为平台提供的 MP4 文件。图片中的 GIF 按图片设置下载。'));
+      }
+      if (site === 'xhs') {
+        const live = mediaGroup('实况照片', 'live', '下载实况照片的动态部分', ['MP4']);
+        live.append(element('small', '静态照片由「图片」设置控制。动态部分单独保存为 MP4。'));
+      }
+      field(videos, 'quality', site === 'x' ? '画质（视频和动图共用）' : '画质（视频和实况片段共用）', 'select', [
         ['best', '优先最高码率'], ['720', '优先约 720p 或更低'], ['small', '优先较小的版本'],
       ]);
+      field(videos, 'videoJson', site === 'x' ? '为视频和动图另存 JSON' : '为视频和实况片段另存 JSON', 'checkbox');
+    } else {
+      media.append(element('small', 'B 站当前支持动态和图文中的图片。视频稿件下载不在当前支持范围内。'));
     }
     if (site === 'x') {
-      field(media, 'quoteDepth', '引用深度（0 仅下载当前帖）', 'number').min = 0;
+      const quotes = optionGroup(form, 'X 引用帖');
+      field(quotes, 'quoteDepth', '引用深度（0 仅下载当前帖）', 'number').min = 0;
       controls.quoteDepth.input.max = 5;
       controls.quoteDepth.input.required = true;
-      field(media, 'attribution', '引用媒体的命名及通用元数据', 'select', [
+      field(quotes, 'attribution', '引用媒体的命名及通用元数据', 'select', [
         ['source', '使用媒体所属帖的信息'], ['outer', '使用外层帖的信息，同时保留来源字段'],
       ]);
-      field(media, 'lookup', '页面数据不完整时查询 X 的公开嵌入服务', 'checkbox');
+      field(quotes, 'lookup', '页面数据不完整时查询 X 的公开嵌入服务', 'checkbox');
     }
     const naming = optionGroup(form, '文件名');
     const template = field(naming, 'filename', '文件名模板');
@@ -1459,15 +1510,9 @@
     controls.titleLength.input.required = true;
     field(naming, 'missing', '缺失字段的替代文字（可留空）').maxLength = 80;
     const preview = element('output');
-    naming.append(preview);
+    locationGroup.append(preview);
 
-    const metadata = optionGroup(form, '元数据');
-    const mode = field(metadata, 'metadataMode', '保存方式', 'select', [
-      ['auto', '图片写入 XMP，无法内嵌时保存 JSON'],
-      ['both', '图片写入 XMP，同时保存图片 JSON'],
-      ['json', '仅保存图片 JSON'], ['off', '关闭图片元数据'],
-    ]);
-    if (site !== 'bili') field(metadata, 'videoJson', '为视频、动图和实况片段另存 JSON', 'checkbox');
+    const metadata = optionGroup(form, '元数据字段与模板');
     const textarea = field(metadata, 'metadata', '字段模板（JSON）', 'textarea');
     metadata.append(element('small', '每行设置字段名与模板，例如 "description": "%posttext%"。可删除或新增字段。title、creator、description、source、identifier、created 同时映射到标准 XMP 字段。'));
     const reference = element('details');
@@ -1480,7 +1525,13 @@
     reference.append(element('summary', '查看全部模板字段'), legend, element('small', '用 %% 输出一个百分号。'));
     metadata.append(reference);
 
-    const ui = optionGroup(form, '按钮与提示');
+    const ui = optionGroup(form, siteNames[site] + ' 的按钮与提示');
+    ui.append(element('small', {
+      x: '时间线和图片查看器：下载按钮位于分享按钮旁。右键下载按钮可打开设置。',
+      bili: '动态列表：下载按钮位于操作栏。图文详情：下载按钮位于侧边工具栏。右键下载按钮可打开设置。',
+      xhs: '笔记详情：下载按钮位于分享按钮旁。图片预览：带 all 标记的按钮下载整篇笔记。右键下载按钮可打开设置。',
+    }[site]));
+    ui.append(element('small', '本页设置仅对 ' + siteNames[site] + ' 生效。其他平台的设置单独保存。'));
     if (site === 'x') field(ui, 'button', '显示下载按钮', 'select', [
       ['media', '媒体帖、引用帖和图片查看器'], ['all', '所有可识别的帖子'],
     ]);
@@ -1499,7 +1550,11 @@
         postid: '1987654321000000000', sourceid: '1987654321000000000', medianame: 'ExampleImage',
         postname: '示例帖子正文首行', type: 'photo', index: 2, index2: '02', total: 4,
         photoindex: 2, photototal: 4, mediaindex: 2, mediatotal: 4, layer: 0, ext: 'jpg', platform: siteNames[site], assetindex: 2 };
-      preview.textContent = '示例路径：' + filePath(demo, current);
+      const base = current.destination === 'directory' ? (selectedFolder?.name || '尚未选择的文件夹') : 'Chrome 下载目录';
+      preview.textContent = '示例保存位置：' + base + '/' + filePath(demo, current);
+      if (current.destination === 'browser' && (current.saveAs || current.conflict === 'prompt')) {
+        preview.textContent += '（保存对话框中可更改最终位置）';
+      }
     }
     form.addEventListener('input', refreshPreview);
     refreshPreview();
@@ -1528,7 +1583,7 @@
     form.addEventListener('submit', event => {
       event.preventDefault();
       const value = read();
-      if (/^[~/\\]|^[A-Za-z]:|\\/.test(value.folder) || value.folder.split('/').some(part => /^\.\.?$/.test(part.trim()))) {
+      if (value.destination === 'browser' && (/^[~/\\]|^[A-Za-z]:|\\/.test(value.folder) || value.folder.split('/').some(part => /^\.\.?$/.test(part.trim())))) {
         message.textContent = '子文件夹模板请使用相对路径。绝对位置请使用文件夹选择器。';
         return;
       }
@@ -1544,13 +1599,14 @@
         return;
       }
       GM_setValue(SETTINGS, { ...settings, ...value });
+      directory = selectedFolder;
       dialog.close();
       scheduleScan();
       if (value.destination === 'directory' && !directory) notify('设置已保存，请选择本地文件夹后再下载');
       else notify('设置已保存');
     });
 
-    dialog.append(form);
+    dialog.append(header, form);
     dialog.addEventListener('close', () => dialog.remove(), { once: true });
     document.body.append(dialog);
     settingsDialog = dialog;
@@ -2027,8 +2083,9 @@
       button = element('button');
       button.type = 'button';
       button.className = 'xmd-native ' + variant;
-      button.title = variant === 'xmd-xhs-all' ? '下载整篇笔记（右键打开设置）' : '下载媒体（右键打开设置）';
-      button.setAttribute('aria-label', variant === 'xmd-xhs-all' ? '全部下载' : '下载媒体');
+      const label = site === 'bili' ? '下载动态图片' : '下载整篇笔记媒体';
+      button.title = label + '（右键打开设置）';
+      button.setAttribute('aria-label', label);
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('viewBox', '0 0 24 24');
       svg.setAttribute('aria-hidden', 'true');
