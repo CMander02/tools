@@ -17,7 +17,9 @@
 // @grant        unsafeWindow
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_openInTab
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
 // @grant        GM_info
@@ -41,8 +43,13 @@
   const page = unsafeWindow;
   const site = location.hostname.endsWith('.bilibili.com') ? 'bili'
     : location.hostname.endsWith('.xiaohongshu.com') ? 'xhs' : 'x';
-  if (window.top !== window && !(site === 'bili' &&
+  const topLevel = window.top === window;
+  if (!topLevel && !(site === 'bili' &&
     (location.hostname === 't.bilibili.com' || /^\/(?:opus|dynamic)\//.test(location.pathname)))) return;
+  const embeddedDirectoryBlocked = !topLevel && (() => {
+    try { return window.top.location.origin !== location.origin; }
+    catch { return true; }
+  })();
   const siteNames = { x: 'X', bili: 'B 站', xhs: '小红书' };
   const ARTICLE = 'article[data-testid="tweet"],article[role="article"]';
   const VIEWER = '[role="dialog"],[aria-modal="true"]';
@@ -53,6 +60,8 @@
   const QUOTE = '[data-testid="quoteTweet"],[role="link"][tabindex],a[href*="/status/"]';
   const BUTTON = 'xmd-download';
   const SETTINGS = site === 'x' ? 'settings-v1' : 'settings-v1:' + site;
+  const BILI_DOWNLOAD_REQUEST = 'bili-download-request:';
+  const BILI_DIRECTORY_SETTINGS = '#xmd-directory-settings';
   const MAX_CACHE = 1200;
   const cache = new Map();
   const active = new Set();
@@ -122,6 +131,7 @@
   let directorySaveFailed = false;
   let queue = Promise.resolve();
   let settingsDialog;
+  let pendingBiliDownload = '';
 
   function asUrl(value) {
     try { return new URL(value, location.origin); }
@@ -1253,7 +1263,8 @@
     if (!directory) await restoreDirectory();
     if (!directory) return pickDirectory();
     const handle = directory;
-    if (await handle.requestPermission({ mode: 'readwrite' }) !== 'granted') {
+    const permission = { mode: 'readwrite' };
+    if (await handle.queryPermission(permission) !== 'granted' && await handle.requestPermission(permission) !== 'granted') {
       throw new Error('Chrome 未授予所选文件夹的写入权限');
     }
     return handle;
@@ -1474,7 +1485,7 @@
     downloadMode.textContent = browserApi ? 'Tampermonkey 下载模式：浏览器 API。'
       : 'Tampermonkey 尚未启用浏览器 API。子文件夹、询问保存位置和重名处理需要此模式。请在 Tampermonkey 管理面板 → 设置 → 下载 BETA 中选择浏览器 API 并保存。';
     locationGroup.append(locationHelp);
-    const pick = element('button', '选择本地文件夹…');
+    const pick = element('button', embeddedDirectoryBlocked ? '在独立页面选择本地文件夹…' : '选择本地文件夹…');
     pick.type = 'button';
     const chosen = element('small');
     const updateDirectory = () => {
@@ -1486,13 +1497,19 @@
       pick.hidden = chosen.hidden = !custom;
       conflict.querySelector('option[value="prompt"]').disabled = custom;
       if (custom && conflict.value === 'prompt') conflict.value = 'uniquify';
-      chosen.textContent = directory ? '当前已选 ' + directory.name + (directorySaveFailed ? '（仅本页可用）' : '')
+      chosen.textContent = embeddedDirectoryBlocked ? '在独立动态页面使用本地文件夹。'
+        : directory ? '当前已选 ' + directory.name + (directorySaveFailed ? '（仅本页可用）' : '')
         : '尚未选择文件夹。点击下载时会提示选择。';
       locationHelp.textContent = custom
         ? '文件直接保存到所选文件夹。浏览器按站点记住文件夹，并在需要时再次询问文件夹权限。'
         : '子文件夹路径用 / 分隔。Chrome/X 表示「Chrome 下载目录/Chrome/X」。请在 chrome://settings/downloads 核对 Chrome 下载目录，避免重复填写已有的目录层级。留空则直接使用 Chrome 下载目录。';
     };
     pick.addEventListener('click', async () => {
+      if (embeddedDirectoryBlocked) {
+        const id = biliId(location.href);
+        GM_openInTab((id ? biliOpusUrl(id) : 'https://www.bilibili.com/') + BILI_DIRECTORY_SETTINGS, { active: true });
+        return;
+      }
       try {
         await pickDirectory();
         updateDirectory();
@@ -1669,7 +1686,7 @@
     document.body.append(dialog);
     settingsDialog = dialog;
     dialog.showModal();
-    restoreDirectory().then(() => {
+    if (!embeddedDirectoryBlocked) restoreDirectory().then(() => {
       if (!dialog.open) return;
       updateDirectory();
       refreshPreview();
@@ -1695,6 +1712,7 @@
 
   const inDomain = (host, domain) => host === domain || host.endsWith('.' + domain);
   const noteId = path => path?.match(/\/(?:explore|discovery\/item|user\/profile\/[a-f0-9]{24})\/([a-f0-9]{24})(?:\/|$)/i)?.[1] || '';
+  const biliOpusUrl = id => 'https://www.bilibili.com/opus/' + id;
   const biliId = url => {
     const parsed = asUrl(url);
     if (!parsed || !inDomain(parsed.hostname, 'bilibili.com')) return '';
@@ -1718,7 +1736,7 @@
     }
     if (inDomain(url.hostname, 'bilibili.com')) {
       const id = biliId(url.href);
-      if (id) return new URL('https://www.bilibili.com/opus/' + id);
+      if (id) return new URL(biliOpusUrl(id));
       if (url.hostname === 'space.bilibili.com' && /^\/\d+(?:\/dynamic)?\/?$/.test(url.pathname)) {
         return new URL(url.pathname, url.origin);
       }
@@ -1895,7 +1913,7 @@
       ?.map(node => node.word?.words || node.rich?.text || node.user?.name || '') || []).join('\n');
     const text = string(opus?.summary?.text ?? dynamic?.desc?.text ?? paragraphText);
     return {
-      platform: 'bili', id, url: 'https://www.bilibili.com/opus/' + id,
+      platform: 'bili', id, url: biliOpusUrl(id),
       author: author.name || '', authorId: numeric(author.mid), time: mediaTime(author.pub_ts),
       title: opus?.title || modules?.module_title?.text || '', text,
       textComplete: Boolean(opus?.summary || dynamic?.desc || paragraphs),
@@ -2063,7 +2081,7 @@
     }
     const stored = otherPosts.get(id) || cachedForPhotos(media, authorId, 'bili');
     const fallback = {
-      platform: 'bili', id, url: id ? 'https://www.bilibili.com/opus/' + id : '',
+      platform: 'bili', id, url: id ? biliOpusUrl(id) : '',
       author: textAt(content, '.opus-module-author__name,.bili-dyn-title__text,.moment-card__author-name,.moment-card__author'),
       authorId, time: domTime(content.querySelector('time,.opus-module-author__pub__text,.bili-dyn-time,.moment-card__time')),
       title: textAt(content, '.opus-module-title__text,.dyn-card-opus__title,.moment-card__title'),
@@ -2140,6 +2158,46 @@
   ].join('\n');
   const xhsDownloadPath = 'M11.43 13.78a.9.9 0 0 0 1.17 0l3.49-3a.9.9 0 0 0-1.18-1.37l-2.01 1.73V3.9a.9.9 0 0 0-1.8 0v7.24L9.08 9.41a.9.9 0 0 0-1.16 1.37l3.51 3zM4.42 11.6a.91.91 0 0 0-1.82 0v4.5A4.93 4.93 0 0 0 7.55 21h9.1a4.93 4.93 0 0 0 4.95-4.9v-4.5a.91.91 0 0 0-1.82 0v4.5a3.12 3.12 0 0 1-3.13 3.1h-9.1a3.12 3.12 0 0 1-3.13-3.1z';
 
+  function openBiliDownload(id) {
+    if (!/^\d{10,24}$/.test(id)) {
+      notify('无法打开独立动态页面', ['未找到动态编号。请打开动态详情，或在脚本设置中改用 Chrome 下载目录。']);
+      return;
+    }
+    const token = crypto.randomUUID();
+    const key = BILI_DOWNLOAD_REQUEST + token;
+    const lifetime = 60_000;
+    GM_setValue(key, { id, expires: Date.now() + lifetime });
+    setTimeout(() => GM_deleteValue(key), lifetime);
+    GM_openInTab(biliOpusUrl(id) + '#xmd-download=' + token, { active: true });
+  }
+
+  function takeBiliDownload() {
+    const token = location.hash.match(/^#xmd-download=([a-f0-9-]{36})$/)?.[1];
+    const id = biliId(location.href);
+    if (!token || !id) return '';
+    const key = BILI_DOWNLOAD_REQUEST + token;
+    const request = GM_getValue(key, null);
+    if (request?.id !== id) return '';
+    GM_deleteValue(key);
+    history.replaceState(history.state, '', location.pathname + location.search);
+    return request.expires >= Date.now() ? id : '';
+  }
+
+  async function resumeBiliDownload(button) {
+    button.disabled = true;
+    let granted = false;
+    try {
+      await restoreDirectory();
+      granted = await directory?.queryPermission({ mode: 'readwrite' }) === 'granted';
+    } catch {
+      // The standalone page can prompt for folder access on the next click.
+    } finally {
+      button.disabled = false;
+    }
+    if (granted && button.isConnected && options().destination === 'directory') button.click();
+    else notify('点击动态右侧的下载按钮，选择文件夹或允许访问后继续。', [], true);
+  }
+
   function attachNative(anchor, container, variant, resolve) {
     let button = container.querySelector('.xmd-native');
     if (!button) {
@@ -2172,10 +2230,15 @@
           notify('未找到当前作品的媒体');
           return;
         }
+        const settings = options();
+        if (embeddedDirectoryBlocked && settings.destination === 'directory') {
+          if (event.isTrusted) openBiliDownload(posts[0].id || biliId(location.href));
+          return;
+        }
         const key = posts[0].id || posts[0].media[0]?.id || 'current';
         const warnings = [];
         if (posts.some(post => !post.id)) warnings.push('作品编号未从页面取得，已按当前页面可用的媒体下载。');
-        enqueueDownload(site + ':' + key, button, options(), () => ({ posts, warnings }));
+        enqueueDownload(site + ':' + key, button, settings, () => ({ posts, warnings }));
       });
       button.addEventListener('contextmenu', event => {
         event.preventDefault();
@@ -2189,6 +2252,10 @@
         slot.append(button);
         anchor.after(slot);
       } else anchor.after(button);
+    }
+    if (variant === 'xmd-bili-detail' && pendingBiliDownload && pendingBiliDownload === biliId(location.href)) {
+      pendingBiliDownload = '';
+      resumeBiliDownload(button);
     }
     const nativeSvg = (variant === 'xmd-xhs-note' ? anchor.querySelector('.share-icon') : anchor.querySelector('svg'));
     const paint = nativeSvg?.querySelector('path,use') || nativeSvg;
@@ -2264,7 +2331,14 @@
   GM_registerMenuCommand(menu, openSettings);
   GM_registerMenuCommand('清理或打开分享链接', openLinkTools);
   function start() {
-    if (options().destination === 'directory') restoreDirectory();
+    if (!embeddedDirectoryBlocked && options().destination === 'directory') restoreDirectory();
+    if (site === 'bili' && topLevel) {
+      pendingBiliDownload = takeBiliDownload();
+      if (location.hash === BILI_DIRECTORY_SETTINGS) {
+        history.replaceState(history.state, '', location.pathname + location.search);
+        openSettings();
+      }
+    }
     ensureStyles();
     const observer = new MutationObserver(scheduleScan);
     observer.observe(document.body, { subtree: true, childList: true, attributes: true,

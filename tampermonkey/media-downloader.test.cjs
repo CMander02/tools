@@ -20,7 +20,7 @@ function load(hostname = 'x.com', downloadMode = 'browser', overrides = {}) {
     ...overrides,
   });
   vm.runInContext(source.slice(0, startup) +
-    'globalThis.api = { contextFor, filePath, saveFile, defaults, options, enqueueDownload, idle: () => queue };\n})();', context);
+    'globalThis.api = { contextFor, filePath, saveFile, defaults, options, enqueueDownload, takeBiliDownload, idle: () => queue };\n})();', context);
   return { ...context.api, downloads, window };
 }
 
@@ -144,6 +144,7 @@ test('download continues after folder selection and reuses the folder after reop
   api.window.showDirectoryPicker = async () => {
     if (++pickCount === 1) throw Object.assign(new Error(), { name: 'AbortError' });
     return {
+      queryPermission: async () => 'prompt',
       requestPermission: async () => { permissionCount++; return 'granted'; },
       getFileHandle: async name => ({ createWritable: async () => ({
         write: async () => { writes.push(name); }, close: async () => {},
@@ -174,4 +175,23 @@ test('download continues after folder selection and reuses the folder after reop
   assert.deepEqual(writes, ['example.jpg', 'example.jpg']);
   assert.deepEqual(reopened.downloads, []);
   assert.equal(button.disabled, false);
+});
+
+test('a standalone Bilibili download only resumes once for the requested post', () => {
+  const id = '1273055540937752600';
+  const token = '82d35fa3-10b2-4d1b-8d97-c5307a047291';
+  const key = 'bili-download-request:' + token;
+  const records = new Map([[key, { id, expires: Date.now() + 60_000 }]]);
+  const open = postId => load('www.bilibili.com', 'browser', {
+    location: new URL('https://www.bilibili.com/opus/' + postId + '#xmd-download=' + token),
+    history: { replaceState() {} },
+    GM_getValue: (name, fallback) => records.get(name) ?? fallback,
+    GM_deleteValue: name => records.delete(name),
+  });
+
+  assert.equal(open('1273055540937752601').takeBiliDownload(), '');
+  assert.equal(open(id).takeBiliDownload(), id);
+  assert.equal(open(id).takeBiliDownload(), '');
+  records.set(key, { id, expires: Date.now() - 1000 });
+  assert.equal(open(id).takeBiliDownload(), '');
 });
