@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, 'media-downloader.user.js'),
 const startup = source.indexOf('  try { watchPageResponses(');
 assert.ok(startup > 0, 'userscript startup exists');
 
-function load(hostname = 'x.com', downloadMode = 'browser') {
+function load(hostname = 'x.com', downloadMode = 'browser', overrides = {}) {
   const downloads = [];
   const window = {};
   window.top = window;
@@ -17,10 +17,11 @@ function load(hostname = 'x.com', downloadMode = 'browser') {
     TextEncoder, TextDecoder, URL, Blob, navigator: {},
     GM_getValue: () => ({}), GM_info: { downloadMode },
     GM_download: details => { downloads.push(details); details.onload(); },
+    ...overrides,
   });
   vm.runInContext(source.slice(0, startup) +
-    'globalThis.api = { filePath, saveFile, defaults };\n})();', context);
-  return { ...context.api, downloads };
+    'globalThis.api = { contextFor, filePath, saveFile, defaults, options, enqueueDownload, idle: () => queue };\n})();', context);
+  return { ...context.api, downloads, window };
 }
 
 const values = { ext: 'jpg', sourceid: '123', outerid: '123', mediaindex: 1, handle: 'author' };
@@ -91,4 +92,51 @@ test('browser subfolders report unsupported Tampermonkey mode instead of flatten
   const config = settings(api);
   await assert.rejects(api.saveFile(new Blob(['photo']), api.filePath(values, config), config, null),
     /浏览器 API/);
+});
+
+test('Bilibili uses the X filename structure and updates the stored old default', () => {
+  const oldTemplate = '%date%_%author%_%postid%_%postname%_%type%-%assetindex%.%ext%';
+  const stored = { filename: oldTemplate };
+  const api = load('space.bilibili.com', 'browser', { GM_getValue: () => stored });
+  const item = { kind: 'photo' };
+  const post = { platform: 'bili', id: '123', author: '1lch2', time: '2026-11-21T03:00:00.000Z',
+    text: '动态正文', media: [item, { kind: 'photo' }] };
+  const config = { ...api.options(), timezone: 'utc' };
+  const context = api.contextFor(post, post, 0, item, { url: 'https://i0.hdslb.com/bfs/photo.png', ext: 'png' }, 0, config);
+  assert.equal(api.filePath(context, config), 'Bilibili/2026-11-21_1lch2_123_photo-1of2.png');
+  stored.filename = '%postid%_%authorid%.%ext%';
+  assert.equal(api.options().filename, stored.filename);
+  stored.filename = oldTemplate;
+  stored.filenameTemplateVersion = 1;
+  assert.equal(api.options().filename, oldTemplate);
+});
+
+test('selecting a folder from download continues the same download after a cancelled attempt', async () => {
+  const api = load('space.bilibili.com', 'browser', {
+    GM_xmlhttpRequest: details => details.onload({ status: 200, response: new Blob([Uint8Array.of(255, 216)]) }),
+  });
+  const writes = [];
+  let pickCount = 0;
+  api.window.showDirectoryPicker = async () => {
+    if (++pickCount === 1) throw Object.assign(new Error(), { name: 'AbortError' });
+    return { getFileHandle: async name => ({ createWritable: async () => ({
+      write: async () => { writes.push(name); }, close: async () => {},
+    }) }) };
+  };
+  const config = settings(api, { destination: 'directory', conflict: 'overwrite', metadataMode: 'off', feedback: false });
+  const post = { platform: 'bili', id: '123', text: '', media: [
+    { kind: 'photo', source: { url: 'https://i0.hdslb.com/bfs/photo.jpg', ext: 'jpg' } },
+  ] };
+  const button = { setAttribute() {}, removeAttribute() {} };
+  const download = () => api.enqueueDownload(post.id, button, config, () => ({ posts: [post], warnings: [] }));
+  download();
+  await api.idle();
+  assert.deepEqual(writes, []);
+  assert.equal(button.disabled, false);
+  download();
+  await api.idle();
+  assert.equal(pickCount, 2);
+  assert.deepEqual(writes, ['example.jpg']);
+  assert.deepEqual(api.downloads, []);
+  assert.equal(button.disabled, false);
 });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         聚合媒体下载
 // @namespace    https://github.com/CMander02/tools
-// @version      1.2.0
+// @version      1.2.1
 // @description  在 X、B 站动态和小红书笔记中下载媒体，支持各站目录、命名模板和图片元数据。
 // @homepageURL  https://github.com/CMander02/tools/tree/main/tampermonkey
 // @downloadURL  https://raw.githubusercontent.com/CMander02/tools/main/tampermonkey/media-downloader.user.js
@@ -100,13 +100,23 @@
     destination: 'browser', folder: { x: '', bili: 'Bilibili', xhs: '小红书' }[site], saveAs: false, conflict: 'uniquify',
     photo: true, video: true, gif: true, live: true, videoJson: false, original: true, quality: 'best',
     quoteDepth: 3, attribution: 'source', lookup: true, button: 'media',
-    filename: site === 'x' ? '%date%_%handle%_%postid%_%type%-%index%of%total%.%ext%'
-      : '%date%_%author%_%postid%_%postname%_%type%-%assetindex%.%ext%',
+    filename: {
+      x: '%date%_%handle%_%postid%_%type%-%index%of%total%.%ext%',
+      bili: '%date%_%author%_%postid%_%type%-%index%of%total%.%ext%',
+      xhs: '%date%_%author%_%postid%_%postname%_%type%-%assetindex%.%ext%',
+    }[site],
     timezone: 'local', titleLength: 70, missing: '',
     metadataMode: 'auto', metadata: defaultMetadata, feedback: true,
   };
 
-  const options = () => ({ ...defaults, ...GM_getValue(SETTINGS, {}) });
+  const options = () => {
+    const settings = { ...defaults, ...GM_getValue(SETTINGS, {}) };
+    if (site === 'bili' && !settings.filenameTemplateVersion &&
+        settings.filename === '%date%_%author%_%postid%_%postname%_%type%-%assetindex%.%ext%') {
+      settings.filename = defaults.filename;
+    }
+    return settings;
+  };
   let directory;
   let queue = Promise.resolve();
   let settingsDialog;
@@ -1198,13 +1208,22 @@
     return button;
   }
 
+  async function pickDirectory() {
+    if (typeof page.showDirectoryPicker !== 'function') throw new Error('当前浏览器不支持本地文件夹选择');
+    return page.showDirectoryPicker({ id: 'media-downloader', mode: 'readwrite', startIn: 'downloads' });
+  }
+
   async function selectedDirectory(settings) {
     if (settings.destination !== 'directory') return null;
-    if (!directory) throw new Error('请在设置中选择本地文件夹');
-    if (await directory.requestPermission({ mode: 'readwrite' }) !== 'granted') {
+    if (!directory) {
+      directory = await pickDirectory();
+      return directory;
+    }
+    const handle = directory;
+    if (await handle.requestPermission({ mode: 'readwrite' }) !== 'granted') {
       throw new Error('Chrome 未授予所选文件夹的写入权限');
     }
-    return directory;
+    return handle;
   }
 
   function startDownload(root, button) {
@@ -1222,12 +1241,6 @@
       notify('此帖已在下载队列中');
       return;
     }
-    if (settings.destination === 'directory' && !directory) {
-      openSettings();
-      notify('请在设置中选择本地文件夹');
-      return;
-    }
-    const directoryPromise = selectedDirectory(settings).then(handle => ({ handle }), error => ({ error }));
     if (settings.destination === 'browser' && settings.folder && GM_info.downloadMode !== 'browser') {
       notify('子文件夹需要 Tampermonkey 的浏览器 API 下载模式',
         ['管理面板 → 设置 → 高级 → 下载 BETA → 浏览器 API → 保存。也可在本脚本中选择本地文件夹。']);
@@ -1236,6 +1249,7 @@
     active.add(id);
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');
+    const directoryPromise = selectedDirectory(settings).then(handle => ({ handle }), error => ({ error }));
     queue = queue.then(async () => {
       const { handle, error } = await directoryPromise;
       if (error) throw error;
@@ -1268,7 +1282,9 @@
       if (requested) parts.push('已提交 ' + requested + ' 项，请查看 Chrome 下载记录');
       if (failures) parts.push(failures + ' 项失败');
       if (settings.feedback || warnings.length) notify(parts.join('，'), warnings);
-    }).catch(error => notify('下载未开始', [error.message])).finally(() => {
+    }).catch(error => {
+      if (error.name !== 'AbortError') notify('下载未开始', [error.message]);
+    }).finally(() => {
       active.delete(id);
       button.disabled = false;
       button.removeAttribute('aria-busy');
@@ -1433,7 +1449,7 @@
       conflict.querySelector('option[value="prompt"]').disabled = custom;
       if (custom && conflict.value === 'prompt') conflict.value = 'uniquify';
       chosen.textContent = selectedFolder ? '当前已选：' + selectedFolder.name + '（最终保存目录）'
-        : '尚未选择文件夹。刷新页面后需重新选择。';
+        : '尚未选择文件夹。点击下载时会提示选择。';
       locationHelp.textContent = custom
         ? '文件直接保存到所选文件夹。Chrome 子文件夹模板在此方式下不生效。例如选择 Downloads/Chrome/X，文件就保存在该文件夹中。'
         : '子文件夹路径用 / 分隔。Chrome/X 表示「Chrome 下载目录/Chrome/X」。请在 chrome://settings/downloads 核对 Chrome 下载目录，避免重复填写已有的目录层级。留空则直接使用 Chrome 下载目录。';
@@ -1441,8 +1457,7 @@
     destination.addEventListener('change', () => { updateDirectory(); refreshPreview(); });
     pick.addEventListener('click', async () => {
       try {
-        if (typeof page.showDirectoryPicker !== 'function') throw new Error('当前浏览器不支持本地文件夹选择');
-        selectedFolder = await page.showDirectoryPicker({ id: 'media-downloader', mode: 'readwrite', startIn: 'downloads' });
+        selectedFolder = await pickDirectory();
         updateDirectory();
         refreshPreview();
       } catch (error) {
@@ -1598,12 +1613,12 @@
         message.textContent = '元数据模板有误：' + error.message;
         return;
       }
+      if (site === 'bili') value.filenameTemplateVersion = 1;
       GM_setValue(SETTINGS, { ...settings, ...value });
       directory = selectedFolder;
       dialog.close();
       scheduleScan();
-      if (value.destination === 'directory' && !directory) notify('设置已保存，请选择本地文件夹后再下载');
-      else notify('设置已保存');
+      notify('设置已保存');
     });
 
     dialog.append(header, form);
