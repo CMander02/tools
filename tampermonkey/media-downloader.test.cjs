@@ -27,6 +27,27 @@ function load(hostname = 'x.com', downloadMode = 'browser', overrides = {}) {
 const values = { ext: 'jpg', sourceid: '123', outerid: '123', mediaindex: 1, handle: 'author' };
 const settings = (api, extra) => ({ ...api.defaults, filename: 'example.%ext%', folder: 'Chrome/X', ...extra });
 
+function directoryDatabase() {
+  const records = new Map();
+  return {
+    open() {
+      const request = { result: {
+        transaction() {
+          const transaction = { objectStore: () => ({
+            get: key => ({ result: records.get(key) }),
+            put: (handle, key) => { records.set(key, handle); return { result: key }; },
+          }) };
+          queueMicrotask(() => transaction.oncomplete());
+          return transaction;
+        },
+        close() {},
+      } };
+      queueMicrotask(() => request.onsuccess());
+      return request;
+    },
+  };
+}
+
 test('Chrome/X remains a relative nested path in browser mode', async () => {
   const api = load();
   const config = settings(api);
@@ -111,32 +132,46 @@ test('Bilibili uses the X filename structure and updates the stored old default'
   assert.equal(api.options().filename, oldTemplate);
 });
 
-test('selecting a folder from download continues the same download after a cancelled attempt', async () => {
-  const api = load('space.bilibili.com', 'browser', {
+test('download continues after folder selection and reuses the folder after reopening the page', async () => {
+  const overrides = {
+    indexedDB: directoryDatabase(),
     GM_xmlhttpRequest: details => details.onload({ status: 200, response: new Blob([Uint8Array.of(255, 216)]) }),
-  });
+  };
+  const api = load('space.bilibili.com', 'browser', overrides);
   const writes = [];
   let pickCount = 0;
+  let permissionCount = 0;
   api.window.showDirectoryPicker = async () => {
     if (++pickCount === 1) throw Object.assign(new Error(), { name: 'AbortError' });
-    return { getFileHandle: async name => ({ createWritable: async () => ({
-      write: async () => { writes.push(name); }, close: async () => {},
-    }) }) };
+    return {
+      requestPermission: async () => { permissionCount++; return 'granted'; },
+      getFileHandle: async name => ({ createWritable: async () => ({
+        write: async () => { writes.push(name); }, close: async () => {},
+      }) }),
+    };
   };
   const config = settings(api, { destination: 'directory', conflict: 'overwrite', metadataMode: 'off', feedback: false });
   const post = { platform: 'bili', id: '123', text: '', media: [
     { kind: 'photo', source: { url: 'https://i0.hdslb.com/bfs/photo.jpg', ext: 'jpg' } },
   ] };
   const button = { setAttribute() {}, removeAttribute() {} };
-  const download = () => api.enqueueDownload(post.id, button, config, () => ({ posts: [post], warnings: [] }));
-  download();
+  const download = instance => instance.enqueueDownload(post.id, button, config, () => ({ posts: [post], warnings: [] }));
+  download(api);
   await api.idle();
   assert.deepEqual(writes, []);
   assert.equal(button.disabled, false);
-  download();
+  download(api);
   await api.idle();
   assert.equal(pickCount, 2);
   assert.deepEqual(writes, ['example.jpg']);
   assert.deepEqual(api.downloads, []);
+  assert.equal(button.disabled, false);
+
+  const reopened = load('space.bilibili.com', 'browser', overrides);
+  download(reopened);
+  await reopened.idle();
+  assert.equal(permissionCount, 1);
+  assert.deepEqual(writes, ['example.jpg', 'example.jpg']);
+  assert.deepEqual(reopened.downloads, []);
   assert.equal(button.disabled, false);
 });

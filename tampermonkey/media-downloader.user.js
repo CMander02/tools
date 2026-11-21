@@ -118,6 +118,8 @@
     return settings;
   };
   let directory;
+  let directoryRestore;
+  let directorySaveFailed = false;
   let queue = Promise.resolve();
   let settingsDialog;
 
@@ -1208,17 +1210,48 @@
     return button;
   }
 
+  async function directoryRecord(mode, handle) {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('media-downloader', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('directories');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise((resolve, reject) => {
+        const transaction = database.transaction('directories', mode);
+        const store = transaction.objectStore('directories');
+        const request = handle ? store.put(handle, 'selected') : store.get('selected');
+        transaction.oncomplete = () => resolve(request.result);
+        transaction.onabort = () => reject(transaction.error);
+      });
+    } finally {
+      database.close();
+    }
+  }
+
+  function restoreDirectory() {
+    directoryRestore ??= directoryRecord('readonly').then(handle => { directory ??= handle; }, () => {});
+    return directoryRestore;
+  }
+
   async function pickDirectory() {
     if (typeof page.showDirectoryPicker !== 'function') throw new Error('当前浏览器不支持本地文件夹选择');
-    return page.showDirectoryPicker({ id: 'media-downloader', mode: 'readwrite', startIn: 'downloads' });
+    const handle = await page.showDirectoryPicker({ id: 'media-downloader', mode: 'readwrite', startIn: 'downloads' });
+    directory = handle;
+    try {
+      await directoryRecord('readwrite', handle);
+      directorySaveFailed = false;
+    } catch {
+      directorySaveFailed = true;
+    }
+    return handle;
   }
 
   async function selectedDirectory(settings) {
     if (settings.destination !== 'directory') return null;
-    if (!directory) {
-      directory = await pickDirectory();
-      return directory;
-    }
+    if (!directory) await restoreDirectory();
+    if (!directory) return pickDirectory();
     const handle = directory;
     if (await handle.requestPermission({ mode: 'readwrite' }) !== 'granted') {
       throw new Error('Chrome 未授予所选文件夹的写入权限');
@@ -1255,6 +1288,7 @@
       if (error) throw error;
       if (settings.feedback) notify('正在读取帖子媒体…', [], true);
       const { posts, warnings } = await resolve();
+      if (handle && directorySaveFailed) warnings.push('浏览器未能记住所选文件夹，重新打开页面后需再选。');
       const jobs = posts.flatMap((post, layer) => post.media.map((item, position) =>
         ({ post, layer, item, position })).filter(({ item }) => settings[item.kind]));
       if (!jobs.length) {
@@ -1376,17 +1410,17 @@
     if (settingsDialog?.open) return;
     ensureStyles();
     const settings = options();
-    let selectedFolder = directory;
     const dialog = element('dialog');
     dialog.className = 'xmd-dialog' + (darkMode() ? ' xmd-dark' : '');
     dialog.setAttribute('aria-labelledby', 'xmd-settings-title');
     const form = element('form');
+    form.append(element('small', '有效修改会自动保存。'));
     const heading = element('h2', menu);
     heading.id = 'xmd-settings-title';
     const header = element('header');
     const close = element('button', '关闭 ✕');
     close.type = 'button';
-    close.setAttribute('aria-label', '关闭设置，不保存修改');
+    close.setAttribute('aria-label', '关闭设置');
     close.addEventListener('click', () => dialog.close());
     header.append(heading, close);
     const controls = {};
@@ -1414,8 +1448,12 @@
         input.value = type === 'textarea' ? JSON.stringify(settings[key], null, 2) : settings[key];
         label.append(labelTitle, input);
       }
+      const error = element('small');
+      error.setAttribute('role', 'status');
+      error.hidden = true;
+      label.append(error);
       parent.append(label);
-      controls[key] = { input, label, type };
+      controls[key] = { input, label, type, error };
       return input;
     }
 
@@ -1448,16 +1486,15 @@
       pick.hidden = chosen.hidden = !custom;
       conflict.querySelector('option[value="prompt"]').disabled = custom;
       if (custom && conflict.value === 'prompt') conflict.value = 'uniquify';
-      chosen.textContent = selectedFolder ? '当前已选：' + selectedFolder.name + '（最终保存目录）'
+      chosen.textContent = directory ? '当前已选 ' + directory.name + (directorySaveFailed ? '（仅本页可用）' : '')
         : '尚未选择文件夹。点击下载时会提示选择。';
       locationHelp.textContent = custom
-        ? '文件直接保存到所选文件夹。Chrome 子文件夹模板在此方式下不生效。例如选择 Downloads/Chrome/X，文件就保存在该文件夹中。'
+        ? '文件直接保存到所选文件夹。浏览器按站点记住文件夹，并在需要时再次询问文件夹权限。'
         : '子文件夹路径用 / 分隔。Chrome/X 表示「Chrome 下载目录/Chrome/X」。请在 chrome://settings/downloads 核对 Chrome 下载目录，避免重复填写已有的目录层级。留空则直接使用 Chrome 下载目录。';
     };
-    destination.addEventListener('change', () => { updateDirectory(); refreshPreview(); });
     pick.addEventListener('click', async () => {
       try {
-        selectedFolder = await pickDirectory();
+        await pickDirectory();
         updateDirectory();
         refreshPreview();
       } catch (error) {
@@ -1528,7 +1565,7 @@
     locationGroup.append(preview);
 
     const metadata = optionGroup(form, '元数据字段与模板');
-    const textarea = field(metadata, 'metadata', '字段模板（JSON）', 'textarea');
+    field(metadata, 'metadata', '字段模板（JSON）', 'textarea');
     metadata.append(element('small', '每行设置字段名与模板，例如 "description": "%posttext%"。可删除或新增字段。title、creator、description、source、identifier、created 同时映射到标准 XMP 字段。'));
     const reference = element('details');
     const legend = element('dl');
@@ -1552,80 +1589,91 @@
     ]);
     field(ui, 'feedback', '显示下载进度和成功提示', 'checkbox');
 
-    function read() {
-      return Object.fromEntries(Object.entries(controls).map(([key, { input, type }]) => [
-        key, type === 'checkbox' ? input.checked : type === 'number' ? Number(input.value) : input.value,
-      ]));
+    function readSetting(key, { input, type }) {
+      if (!input.validity.valid) throw new Error(input.validationMessage);
+      if (type === 'checkbox') return input.checked;
+      if (type === 'number') return input.valueAsNumber;
+      const value = input.value;
+      if (key === 'folder' && (/^[~/\\]|^[A-Za-z]:|\\/.test(value) || value.split('/').some(part => /^\.\.?$/.test(part.trim())))) {
+        throw new Error('子文件夹模板需要相对路径。绝对位置请使用文件夹选择器。');
+      }
+      if (key !== 'metadata') return value;
+      const parsed = JSON.parse(value);
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object' ||
+          Object.entries(parsed).some(([name, text]) => !/^[a-z][a-z0-9_]{0,63}$/i.test(name) ||
+            typeof text !== 'string' || ['constructor', 'prototype'].includes(name))) {
+        throw new Error('元数据模板须为 JSON 对象。字段名以英文字母开头，值使用字符串。');
+      }
+      return parsed;
     }
+
+    function saveSettings(values) {
+      if (site === 'bili' && Object.hasOwn(values, 'filename')) values.filenameTemplateVersion = 1;
+      GM_setValue(SETTINGS, { ...GM_getValue(SETTINGS, {}), ...values });
+      scheduleScan();
+    }
+
     function refreshPreview() {
-      const current = read();
+      const current = options();
       controls.metadata.label.hidden = mode.value === 'off' && !controls.videoJson?.input.checked;
       const demo = { ...Object.fromEntries(Object.keys(fields).map(key => [key, ''])),
         date: '2026-11-10', time: '164000', handle: 'labrin', at: '@labrin', author: 'Labrin',
         postid: '1987654321000000000', sourceid: '1987654321000000000', medianame: 'ExampleImage',
         postname: '示例帖子正文首行', type: 'photo', index: 2, index2: '02', total: 4,
         photoindex: 2, photototal: 4, mediaindex: 2, mediatotal: 4, layer: 0, ext: 'jpg', platform: siteNames[site], assetindex: 2 };
-      const base = current.destination === 'directory' ? (selectedFolder?.name || '尚未选择的文件夹') : 'Chrome 下载目录';
+      const base = current.destination === 'directory' ? (directory?.name || '尚未选择的文件夹') : 'Chrome 下载目录';
       preview.textContent = '示例保存位置：' + base + '/' + filePath(demo, current);
       if (current.destination === 'browser' && (current.saveAs || current.conflict === 'prompt')) {
         preview.textContent += '（保存对话框中可更改最终位置）';
       }
     }
-    form.addEventListener('input', refreshPreview);
+    for (const [key, control] of Object.entries(controls)) {
+      control.input.addEventListener('input', () => {
+        try {
+          const value = readSetting(key, control);
+          const changes = { [key]: value };
+          if (key === 'destination' && value === 'directory' && conflict.value === 'prompt') {
+            changes.conflict = 'uniquify';
+          }
+          saveSettings(changes);
+          control.error.hidden = true;
+          if (key === 'destination') updateDirectory();
+          refreshPreview();
+        } catch (error) {
+          control.error.textContent = '当前修改未保存。' + error.message;
+          control.error.hidden = false;
+        }
+      });
+    }
     refreshPreview();
 
-    const message = element('output');
-    message.setAttribute('role', 'status');
     const footer = element('footer');
     const reset = element('button', '恢复默认值');
     reset.type = 'button';
     reset.addEventListener('click', () => {
-      for (const [key, { input, type }] of Object.entries(controls)) {
+      saveSettings(Object.fromEntries(Object.keys(controls).map(key => [key, defaults[key]])));
+      for (const [key, { input, type, error }] of Object.entries(controls)) {
         if (type === 'checkbox') input.checked = defaults[key];
         else input.value = type === 'textarea' ? JSON.stringify(defaultMetadata, null, 2) : defaults[key];
+        error.hidden = true;
       }
       updateDirectory();
       refreshPreview();
-      message.textContent = '已填入默认值，点击保存设置后生效。';
     });
-    const cancel = element('button', '取消');
-    cancel.type = 'button';
-    cancel.addEventListener('click', () => dialog.close());
-    const save = element('button', '保存设置');
-    save.type = 'submit';
-    footer.append(reset, cancel, save);
-    form.append(message, footer);
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      const value = read();
-      if (value.destination === 'browser' && (/^[~/\\]|^[A-Za-z]:|\\/.test(value.folder) || value.folder.split('/').some(part => /^\.\.?$/.test(part.trim())))) {
-        message.textContent = '子文件夹模板请使用相对路径。绝对位置请使用文件夹选择器。';
-        return;
-      }
-      try {
-        value.metadata = controls.metadata.label.hidden ? settings.metadata : JSON.parse(textarea.value);
-        if (!value.metadata || Array.isArray(value.metadata) || typeof value.metadata !== 'object' ||
-            Object.entries(value.metadata).some(([key, text]) => !/^[a-z][a-z0-9_]{0,63}$/i.test(key) ||
-              typeof text !== 'string' || ['constructor', 'prototype'].includes(key))) {
-          throw new Error('元数据模板须为 JSON 对象。字段名以英文字母开头，值使用字符串。');
-        }
-      } catch (error) {
-        message.textContent = '元数据模板有误：' + error.message;
-        return;
-      }
-      if (site === 'bili') value.filenameTemplateVersion = 1;
-      GM_setValue(SETTINGS, { ...settings, ...value });
-      directory = selectedFolder;
-      dialog.close();
-      scheduleScan();
-      notify('设置已保存');
-    });
+    footer.append(reset);
+    form.append(footer);
+    form.addEventListener('submit', event => event.preventDefault());
 
     dialog.append(header, form);
     dialog.addEventListener('close', () => dialog.remove(), { once: true });
     document.body.append(dialog);
     settingsDialog = dialog;
     dialog.showModal();
+    restoreDirectory().then(() => {
+      if (!dialog.open) return;
+      updateDirectory();
+      refreshPreview();
+    });
   }
 
   const biliCards = '.bili-dyn-item,.moment-card,.moment-card-shell';
@@ -2216,6 +2264,7 @@
   GM_registerMenuCommand(menu, openSettings);
   GM_registerMenuCommand('清理或打开分享链接', openLinkTools);
   function start() {
+    if (options().destination === 'directory') restoreDirectory();
     ensureStyles();
     const observer = new MutationObserver(scheduleScan);
     observer.observe(document.body, { subtree: true, childList: true, attributes: true,
