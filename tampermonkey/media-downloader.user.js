@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         聚合媒体下载
 // @namespace    https://github.com/CMander02/tools
-// @version      1.3.0
+// @version      1.3.1
 // @description  下载 X、B 站动态、小红书笔记和 Pixiv 的媒体及 Pixiv 小说，支持分站目录、命名模板和图片元数据。
 // @homepageURL  https://github.com/CMander02/tools/tree/main/tampermonkey
 // @downloadURL  https://raw.githubusercontent.com/CMander02/tools/main/tampermonkey/media-downloader.user.js
@@ -109,7 +109,8 @@
   };
 
   const defaults = {
-    destination: 'browser', folder: { x: '', bili: 'Bilibili', xhs: '小红书', pixiv: 'Pixiv' }[site], saveAs: false, conflict: 'uniquify',
+    destination: site === 'pixiv' && typeof page.showDirectoryPicker === 'function' ? 'directory' : 'browser',
+    folder: { x: '', bili: 'Bilibili', xhs: '小红书', pixiv: 'Pixiv' }[site], saveAs: false, conflict: 'uniquify',
     photo: true, video: true, gif: true, live: true, videoJson: false, original: true, quality: 'best',
     novel: true, novelFormat: 'epub',
     quoteDepth: 3, attribution: 'source', lookup: true, button: 'media',
@@ -117,7 +118,7 @@
       x: '%date%_%handle%_%postid%_%type%-%index%of%total%.%ext%',
       bili: '%date%_%author%_%postid%_%type%-%index%of%total%.%ext%',
       xhs: '%date%_%author%_%postid%_%postname%_%type%-%assetindex%.%ext%',
-      pixiv: '%medianame%_%postname%.%ext%',
+      pixiv: '%date%_%author%_%postid%_%type%-%index%of%total%.%ext%',
     }[site],
     timezone: 'local', titleLength: 70, missing: '',
     metadataMode: 'auto',
@@ -126,10 +127,13 @@
     feedback: true,
   };
 
+  const oldFilenameTemplates = {
+    bili: '%date%_%author%_%postid%_%postname%_%type%-%assetindex%.%ext%',
+    pixiv: '%medianame%_%postname%.%ext%',
+  };
   const options = () => {
     const settings = { ...defaults, ...GM_getValue(SETTINGS, {}) };
-    if (site === 'bili' && !settings.filenameTemplateVersion &&
-        settings.filename === '%date%_%author%_%postid%_%postname%_%type%-%assetindex%.%ext%') {
+    if (!settings.filenameTemplateVersion && settings.filename === oldFilenameTemplates[site]) {
       settings.filename = defaults.filename;
     }
     return settings;
@@ -996,18 +1000,25 @@
 
   const downloadErrors = {
     not_enabled: '请在 Tampermonkey 中启用浏览器 API 下载模式',
-    not_whitelisted: '请在 Tampermonkey 的下载设置中允许此文件扩展名',
     not_permitted: 'Tampermonkey 缺少 Chrome 下载权限',
     not_supported: '当前 Tampermonkey 不支持此下载方式',
     not_succeeded: '下载失败或已取消',
   };
+  const whitelistSetting = 'Tampermonkey 管理面板 → 设置 → 下载 BETA → 文件扩展名白名单';
 
   function gmDownload(payload, path, settings) {
     return new Promise((resolve, reject) => {
       GM_download({
         url: payload, name: path, saveAs: settings.saveAs, conflictAction: settings.conflict,
         onload: () => resolve('saved'),
-        onerror: error => reject(new Error(downloadErrors[error.error] || error.error || '下载失败')),
+        onerror: ({ error }) => {
+          const suffix = '.' + path.split('.').at(-1);
+          const message = error === 'not_whitelisted'
+            ? 'Tampermonkey 拦截了 ' + suffix + ' 文件。请在「' + whitelistSetting + '」添加 ' + suffix +
+              '，或在脚本设置中改用手动选择本地文件夹。'
+            : downloadErrors[error] || error || '下载失败';
+          reject(new Error(message));
+        },
         ontimeout: () => reject(new Error('下载超时')),
       });
     });
@@ -1363,7 +1374,8 @@
           if (result.warning) warnings.push(result.warning);
         } catch (error) {
           failures++;
-          warnings.push(at(job.post.handle) + ' / ' + (job.post.id || '引用帖') + ' / 媒体 ' + (job.position + 1) + '：' + error.message);
+          const label = job.item.kind === 'novel' ? '小说' : '媒体 ' + (job.position + 1);
+          warnings.push([at(job.post.handle), job.post.id || '引用帖', label].filter(Boolean).join(' / ') + '：' + error.message);
         }
       }
       const parts = [];
@@ -1549,8 +1561,10 @@
         : directory ? '当前已选 ' + directory.name + (directorySaveFailed ? '（仅本页可用）' : '')
         : '尚未选择文件夹。点击下载时会提示选择。';
       locationHelp.textContent = custom
-        ? '文件直接保存到所选文件夹。浏览器按站点记住文件夹，并在需要时再次询问文件夹权限。'
-        : '子文件夹路径用 / 分隔。Chrome/X 表示「Chrome 下载目录/Chrome/X」。请在 chrome://settings/downloads 核对 Chrome 下载目录，避免重复填写已有的目录层级。留空则直接使用 Chrome 下载目录。';
+        ? '文件直接保存到所选文件夹。浏览器按站点记住文件夹，并在需要时再次询问文件夹权限。' +
+          (site === 'pixiv' ? ' 首次请选择要用于保存作品和小说的 Pixiv 文件夹。' : '')
+        : '子文件夹路径用 / 分隔。Chrome/X 表示「Chrome 下载目录/Chrome/X」。请在 chrome://settings/downloads 核对 Chrome 下载目录，避免重复填写已有的目录层级。留空则直接使用 Chrome 下载目录。' +
+          (site === 'pixiv' ? ' 如果 Chrome 将文件存到了根目录并改成随机文件名，请改用手动选择本地文件夹。' : '');
     };
     pick.addEventListener('click', async () => {
       if (embeddedDirectoryBlocked) {
@@ -1593,6 +1607,7 @@
       animation.append(element('small', '下载 Pixiv 提供的帧文件 ZIP 和记录每帧时长的 JSON。'));
       const novels = mediaGroup('小说', 'novel', '下载 Pixiv 小说', ['EPUB', 'TXT']);
       field(novels, 'novelFormat', '小说格式', 'select', [['epub', 'EPUB'], ['txt', 'TXT（UTF-8）']]);
+      novels.append(element('small', '通过 Chrome 下载 EPUB 时，请在「' + whitelistSetting + '」添加 .epub。手动选择本地文件夹时可直接保存。'));
     } else if (site !== 'bili') {
       const videos = mediaGroup('视频', 'video', '下载视频', ['MP4']);
       if (site === 'x') {
@@ -1680,7 +1695,7 @@
     }
 
     function saveSettings(values) {
-      if (site === 'bili' && Object.hasOwn(values, 'filename')) values.filenameTemplateVersion = 1;
+      if (oldFilenameTemplates[site] && Object.hasOwn(values, 'filename')) values.filenameTemplateVersion = 1;
       GM_setValue(SETTINGS, { ...GM_getValue(SETTINGS, {}), ...values });
       scheduleScan();
     }
@@ -1694,6 +1709,10 @@
         postid: '1987654321000000000', sourceid: '1987654321000000000', medianame: 'ExampleImage',
         postname: '示例帖子正文首行', type: 'photo', index: 2, index2: '02', total: 4,
         photoindex: 2, photototal: 4, mediaindex: 2, mediatotal: 4, layer: 0, ext: 'jpg', platform: siteNames[site], assetindex: 2 };
+      if (site === 'pixiv' && pixivRoute(new URL(location.href))?.type === 'novel') {
+        Object.assign(demo, { type: 'novel', ext: current.novelFormat, postname: '示例小说标题',
+          index: 1, index2: '01', total: 1, photoindex: '', photototal: 0, mediaindex: 1, mediatotal: 1, assetindex: 1 });
+      }
       const base = current.destination === 'directory' ? (directory?.name || '尚未选择的文件夹') : 'Chrome 下载目录';
       preview.textContent = '示例保存位置：' + base + '/' + filePath(demo, current);
       if (current.destination === 'browser' && (current.saveAs || current.conflict === 'prompt')) {
