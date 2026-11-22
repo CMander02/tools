@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         聚合媒体下载
 // @namespace    https://github.com/CMander02/tools
-// @version      1.3.1
-// @description  下载 X、B 站动态、小红书笔记和 Pixiv 的媒体及 Pixiv 小说，支持分站目录、命名模板和图片元数据。
+// @version      1.3.2
+// @description  下载 X、B 站动态、小红书和 Pixiv 的媒体。支持 Pixiv 小说、分站目录、命名模板和图片元数据。
+//
 // @homepageURL  https://github.com/CMander02/tools/tree/main/tampermonkey
 // @downloadURL  https://raw.githubusercontent.com/CMander02/tools/main/tampermonkey/media-downloader.user.js
 // @updateURL    https://raw.githubusercontent.com/CMander02/tools/main/tampermonkey/media-downloader.user.js
+//
 // @match        https://x.com/*
 // @match        https://twitter.com/*
 // @match        https://www.bilibili.com/*
@@ -13,9 +15,12 @@
 // @match        https://t.bilibili.com/*
 // @match        https://www.xiaohongshu.com/*
 // @match        https://www.pixiv.net/*
+//
 // @run-at       document-start
 // @sandbox      raw
+//
 // @grant        unsafeWindow
+// @grant        GM_info
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
@@ -23,7 +28,10 @@
 // @grant        GM_openInTab
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
-// @grant        GM_info
+//
+// @connect      x.com
+// @connect      twitter.com
+// @connect      t.co
 // @connect      pbs.twimg.com
 // @connect      video.twimg.com
 // @connect      cdn.syndication.twimg.com
@@ -33,11 +41,10 @@
 // @connect      xhscdn.com
 // @connect      xiaohongshu.com
 // @connect      xhslink.com
-// @connect      t.co
-// @connect      x.com
-// @connect      twitter.com
 // @connect      pximg.net
 // ==/UserScript==
+
+// 使用「Chrome 下载目录」时，在 Tampermonkey 管理面板的「设置 → 下载 BETA」配置下载模式和文件扩展名白名单。
 
 (() => {
   'use strict';
@@ -998,13 +1005,17 @@
     }
   }
 
+  const downloadSettingsPath = 'Tampermonkey 管理面板 → 设置 → 下载 BETA';
+  const advancedSettingsHelp = '若看不到「下载 BETA」，先将「配置模式」切换为「高级」。';
+  const browserDownloadHelp = '请在「' + downloadSettingsPath + '」将「下载模式」设为「浏览器 API」，保存并授予 Chrome 下载权限。' +
+    advancedSettingsHelp;
   const downloadErrors = {
-    not_enabled: '请在 Tampermonkey 中启用浏览器 API 下载模式',
-    not_permitted: 'Tampermonkey 缺少 Chrome 下载权限',
+    not_enabled: browserDownloadHelp,
+    not_permitted: 'Tampermonkey 缺少 Chrome 下载权限。' + browserDownloadHelp,
     not_supported: '当前 Tampermonkey 不支持此下载方式',
     not_succeeded: '下载失败或已取消',
   };
-  const whitelistSetting = 'Tampermonkey 管理面板 → 设置 → 下载 BETA → 文件扩展名白名单';
+  const whitelistSetting = downloadSettingsPath + ' → 文件扩展名白名单';
 
   function gmDownload(payload, path, settings) {
     return new Promise((resolve, reject) => {
@@ -1014,8 +1025,8 @@
         onerror: ({ error }) => {
           const suffix = '.' + path.split('.').at(-1);
           const message = error === 'not_whitelisted'
-            ? 'Tampermonkey 拦截了 ' + suffix + ' 文件。请在「' + whitelistSetting + '」添加 ' + suffix +
-              '，或在脚本设置中改用手动选择本地文件夹。'
+            ? 'Tampermonkey 拦截了 ' + suffix + ' 文件。请在「' + whitelistSetting + '」另起一行添加 ' + suffix +
+              ' 并保存。' + advancedSettingsHelp + '也可在脚本设置中改用手动选择本地文件夹。'
             : downloadErrors[error] || error || '下载失败';
           reject(new Error(message));
         },
@@ -1342,7 +1353,7 @@
     }
     if (settings.destination === 'browser' && settings.folder && GM_info.downloadMode !== 'browser') {
       notify('子文件夹需要 Tampermonkey 的浏览器 API 下载模式',
-        ['管理面板 → 设置 → 高级 → 下载 BETA → 浏览器 API → 保存。也可在本脚本中选择本地文件夹。']);
+        [browserDownloadHelp, '也可在脚本设置中改用手动选择本地文件夹。']);
       return;
     }
     active.add(id);
@@ -1542,8 +1553,9 @@
     const locationHelp = element('small');
     const downloadMode = element('small');
     const browserApi = GM_info.downloadMode === 'browser';
-    downloadMode.textContent = browserApi ? 'Tampermonkey 下载模式：浏览器 API。'
-      : 'Tampermonkey 尚未启用浏览器 API。子文件夹、询问保存位置和重名处理需要此模式。请在 Tampermonkey 管理面板 → 设置 → 下载 BETA 中选择浏览器 API 并保存。';
+    downloadMode.textContent = (browserApi ? '当前使用 Tampermonkey 的浏览器 API 下载模式。'
+      : '子文件夹、询问保存位置和重名处理需要浏览器 API 下载模式。' + browserDownloadHelp) +
+      ' 若提示扩展名受限，请在「' + whitelistSetting + '」添加对应扩展名并保存。';
     locationGroup.append(locationHelp);
     const pick = element('button', embeddedDirectoryBlocked ? '在独立页面选择本地文件夹…' : '选择本地文件夹…');
     pick.type = 'button';
