@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const source = fs.readFileSync(path.join(__dirname, 'media-downloader.user.js'), 'utf8');
-const startup = source.indexOf('  try { watchPageResponses(');
+const startup = source.indexOf("  try { if (site !== 'pixiv') watchPageResponses(");
 assert.ok(startup > 0, 'userscript startup exists');
 
 function load(hostname = 'x.com', downloadMode = 'browser', overrides = {}) {
@@ -20,7 +20,8 @@ function load(hostname = 'x.com', downloadMode = 'browser', overrides = {}) {
     ...overrides,
   });
   vm.runInContext(source.slice(0, startup) +
-    'globalThis.api = { contextFor, filePath, saveFile, defaults, options, enqueueDownload, takeBiliDownload, idle: () => queue };\n})();', context);
+    'globalThis.api = { contextFor, filePath, saveFile, defaults, options, enqueueDownload, takeBiliDownload, ' +
+    'cleanLink, resolvePixiv, saveMedia, idle: () => queue };\n})();', context);
   return { ...context.api, downloads, window };
 }
 
@@ -194,4 +195,79 @@ test('a standalone Bilibili download only resumes once for the requested post', 
   assert.equal(open(id).takeBiliDownload(), '');
   records.set(key, { id, expires: Date.now() - 1000 });
   assert.equal(open(id).takeBiliDownload(), '');
+});
+
+test('Pixiv downloads all original pages with their own filenames and post tags', async () => {
+  const png = new Blob([Buffer.from('89504e470d0a1a0a', 'hex')], { type: 'image/png' });
+  const url = 'https://i.pximg.net/img-original/';
+  const pages = [0, 1].map(index => ({ urls: { original: url + '123_p' + index + '.png' } }));
+  const api = load('www.pixiv.net', 'browser', {
+    DOMParser: class { parseFromString(text) { return { body: { textContent: text } }; } },
+    GM_xmlhttpRequest: request => {
+      assert.equal(request.headers.Referer, 'https://www.pixiv.net/');
+      assert.ok(pages.some(page => page.urls.original === request.url));
+      request.onload({ status: 200, response: png });
+    },
+  });
+  api.window.fetch = async path => ({ ok: true, json: async () => ({
+    body: path.endsWith('/pages') ? pages : { pageCount: 2, title: 'Artwork', tags: { tags: [{ tag: '投稿标签' }] } },
+  }) });
+  const config = { ...api.defaults, metadataMode: 'json' };
+  const { posts: [post] } = await api.resolvePixiv({ id: '123', type: 'illust' }, config);
+  const paths = new Set();
+  for (const [position, item] of post.media.entries()) {
+    await api.saveMedia({ post, item, layer: 0, position }, post, config, undefined, paths);
+  }
+  assert.deepEqual(api.downloads.map(file => file.name), [0, 1].flatMap(index =>
+    ['.png', '.png.json'].map(suffix => 'Pixiv/123_p' + index + '_Artwork' + suffix)));
+  const metadata = JSON.parse(await api.downloads[1].url.text());
+  assert.equal(metadata.title, 'Artwork');
+  assert.equal(metadata.source, 'https://www.pixiv.net/artworks/123');
+  assert.equal(metadata.tags, '投稿标签');
+  assert.equal(api.cleanLink('https://www.pixiv.net/en/artworks/123?utm_source=share').href, metadata.source);
+  assert.equal(api.cleanLink('https://www.pixiv.net/novel/show.php?id=456&utm_source=share').search, '?id=456');
+});
+
+test('Pixiv EPUB embeds both inline image types and TXT points to adjacent files', async () => {
+  const png = new Blob([Buffer.from('89504e470d0a1a0a', 'hex')], { type: 'image/png' });
+  const imagePage = id => ({ urls: { original: 'https://i.pximg.net/' + id + '.png' } });
+  const novel = { title: 'A & B', userName: 'Writer', content: '[chapter:Opening]\nText\n[uploadedimage:9]\n[pixivimage:17-2]',
+    tags: { tags: [{ tag: 'Novel tag' }] }, language: 'en', textEmbeddedImages: { 9: imagePage('upload') } };
+  const api = load('www.pixiv.net', 'browser', {
+    DOMParser: class { parseFromString(text) { return { body: { textContent: text } }; } },
+    GM_xmlhttpRequest: request => request.onload({ status: 200, response: png }),
+  });
+  api.window.fetch = async path => ({ ok: true, json: async () => ({
+    body: path === '/ajax/illust/17/pages' ? [imagePage('first'), imagePage('second')] : novel,
+  }) });
+  const config = { ...api.defaults, metadataMode: 'json' };
+  const { posts: [post] } = await api.resolvePixiv({ id: '456', type: 'novel' }, config);
+  const job = { post, item: post.media[0], layer: 0, position: 0 };
+  assert.equal(config.novelFormat, 'epub');
+  assert.equal((await api.saveMedia(job, post, config, undefined, new Set())).warning, '');
+  assert.equal(api.downloads[0].name, 'Pixiv/novel-456_A & B.epub');
+  const zip = Buffer.from(await api.downloads[0].url.arrayBuffer());
+  const entries = new Map();
+  for (let offset = 0; zip.readUInt32LE(offset) === 0x04034b50;) {
+    const size = zip.readUInt32LE(offset + 18);
+    const length = zip.readUInt16LE(offset + 26);
+    const start = offset + 30;
+    const end = start + length + zip.readUInt16LE(offset + 28);
+    entries.set(zip.toString('utf8', start, start + length), zip.subarray(end, end + size));
+    offset = end + size;
+  }
+  assert.equal(zip.readUInt16LE(8), 0);
+  assert.equal(entries.keys().next().value, 'mimetype');
+  assert.equal(entries.get('mimetype').toString(), 'application/epub+zip');
+  assert.match(entries.get('EPUB/book.opf').toString(), /<dc:title>A &amp; B<\/dc:title>/);
+  assert.match(entries.get('EPUB/story.xhtml').toString(), /src="images\/1\.png"[\s\S]+src="images\/2\.png"/);
+  assert.equal(JSON.parse(entries.get('META-INF/pixiv/2.png.json')).media_url, 'https://i.pximg.net/second.png');
+
+  assert.equal((await api.saveMedia(job, post, { ...config, novelFormat: 'txt' }, undefined, new Set())).warning, '');
+  const book = api.downloads.at(-1);
+  assert.equal(book.name, 'Pixiv/novel-456_A & B.txt');
+  assert.match(await book.url.text(), /标签：Novel tag[\s\S]+novel-456_A & B_illustration-2\.png/);
+  const metadata = JSON.parse(await api.downloads.at(-2).url.text());
+  assert.equal(metadata.image_role, 'illustration');
+  assert.equal(metadata.source, 'https://www.pixiv.net/novel/show.php?id=456');
 });

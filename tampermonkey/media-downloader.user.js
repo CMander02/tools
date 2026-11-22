@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         聚合媒体下载
 // @namespace    https://github.com/CMander02/tools
-// @version      1.2.1
-// @description  在 X、B 站动态和小红书笔记中下载媒体，支持各站目录、命名模板和图片元数据。
+// @version      1.3.0
+// @description  下载 X、B 站动态、小红书笔记和 Pixiv 的媒体及 Pixiv 小说，支持分站目录、命名模板和图片元数据。
 // @homepageURL  https://github.com/CMander02/tools/tree/main/tampermonkey
 // @downloadURL  https://raw.githubusercontent.com/CMander02/tools/main/tampermonkey/media-downloader.user.js
 // @updateURL    https://raw.githubusercontent.com/CMander02/tools/main/tampermonkey/media-downloader.user.js
@@ -12,6 +12,7 @@
 // @match        https://space.bilibili.com/*
 // @match        https://t.bilibili.com/*
 // @match        https://www.xiaohongshu.com/*
+// @match        https://www.pixiv.net/*
 // @run-at       document-start
 // @sandbox      raw
 // @grant        unsafeWindow
@@ -35,6 +36,7 @@
 // @connect      t.co
 // @connect      x.com
 // @connect      twitter.com
+// @connect      pximg.net
 // ==/UserScript==
 
 (() => {
@@ -42,7 +44,8 @@
 
   const page = unsafeWindow;
   const site = location.hostname.endsWith('.bilibili.com') ? 'bili'
-    : location.hostname.endsWith('.xiaohongshu.com') ? 'xhs' : 'x';
+    : location.hostname.endsWith('.xiaohongshu.com') ? 'xhs'
+      : location.hostname === 'www.pixiv.net' ? 'pixiv' : 'x';
   const topLevel = window.top === window;
   if (!topLevel && !(site === 'bili' &&
     (location.hostname === 't.bilibili.com' || /^\/(?:opus|dynamic)\//.test(location.pathname)))) return;
@@ -50,7 +53,7 @@
     try { return window.top.location.origin !== location.origin; }
     catch { return true; }
   })();
-  const siteNames = { x: 'X', bili: 'B 站', xhs: '小红书' };
+  const siteNames = { x: 'X', bili: 'B 站', xhs: '小红书', pixiv: 'Pixiv' };
   const ARTICLE = 'article[data-testid="tweet"],article[role="article"]';
   const VIEWER = '[role="dialog"],[aria-modal="true"]';
   const MEDIA_ROUTE = /\/status\/\d+\/(?:photo|video)\/(\d+)\/?$/;
@@ -106,16 +109,21 @@
   };
 
   const defaults = {
-    destination: 'browser', folder: { x: '', bili: 'Bilibili', xhs: '小红书' }[site], saveAs: false, conflict: 'uniquify',
+    destination: 'browser', folder: { x: '', bili: 'Bilibili', xhs: '小红书', pixiv: 'Pixiv' }[site], saveAs: false, conflict: 'uniquify',
     photo: true, video: true, gif: true, live: true, videoJson: false, original: true, quality: 'best',
+    novel: true, novelFormat: 'epub',
     quoteDepth: 3, attribution: 'source', lookup: true, button: 'media',
     filename: {
       x: '%date%_%handle%_%postid%_%type%-%index%of%total%.%ext%',
       bili: '%date%_%author%_%postid%_%type%-%index%of%total%.%ext%',
       xhs: '%date%_%author%_%postid%_%postname%_%type%-%assetindex%.%ext%',
+      pixiv: '%medianame%_%postname%.%ext%',
     }[site],
     timezone: 'local', titleLength: 70, missing: '',
-    metadataMode: 'auto', metadata: defaultMetadata, feedback: true,
+    metadataMode: 'auto',
+    metadata: site === 'pixiv' ? { ...defaultMetadata, title: '%worktitle%', tags: '%tags%',
+      work_type: '%worktype%', image_role: '%imagerole%' } : defaultMetadata,
+    feedback: true,
   };
 
   const options = () => {
@@ -352,10 +360,10 @@
     };
   }
 
-  function request(url, responseType, timeout = 20000) {
+  function request(url, responseType, timeout = 20000, headers) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
-        method: 'GET', url, responseType, timeout, anonymous: true,
+        method: 'GET', url, responseType, timeout, anonymous: true, headers,
         onload: result => result.status >= 200 && result.status < 300
           ? resolve(result.response) : reject(new Error('HTTP ' + result.status)),
         onerror: () => reject(new Error('网络请求失败')),
@@ -565,7 +573,7 @@
     ext: '扩展名（不带点）', filename: '保存的文件名（仅供元数据模板使用）', medianame: '平台提供的媒体文件名（不带扩展名）',
     platform: '平台名称', pairedphoto: '实况视频对应的静态图片序号',
     assetindex: '图片或实况的图片序号，其他视频使用同类型序号',
-    mediaid: '媒体 ID', type: '媒体类型（photo、video、gif 或 live）',
+    mediaid: '媒体 ID', type: '媒体类型',
     index: '同类型序号', total: '同类型总数', index2: '补零后的同类型序号',
     photoindex: '图片序号（视频为空）', photototal: '图片总数',
     mediaindex: '所有媒体中的序号', mediatotal: '所有媒体总数',
@@ -583,6 +591,8 @@
     outerpublished: '外层帖发布时间（ISO 8601 UTC）', layer: '引用深度（0 为外层）',
     repostedby: '界面显示的转发账号（如有）', mediaurl: '媒体文件地址', alt: '图片替代文字',
     missing: '缺失或未确认的元数据字段',
+    ...(site === 'pixiv' ? { tags: 'Pixiv 标签（每行一个）', worktitle: 'Pixiv 作品完整标题',
+      worktype: 'Pixiv 作品类型', imagerole: '小说图片用途' } : {}),
   };
 
   const string = value => value == null ? '' : String(value);
@@ -664,6 +674,7 @@
       outerid: outer.id, outerurl: postUrl(outer), outerauthor: outer.author, outerat: at(outer.handle),
       outerauthorid: outer.authorId, outertext: outer.text, outerpublished: outer.time, layer,
       repostedby: outer.repostedBy, mediaurl: source.url, alt: item.alt, missing: missing.join(', '),
+      tags: owner.tags?.join('\n'), worktitle: owner.title, worktype: owner.workType, imagerole: item.imageRole,
     };
   }
 
@@ -715,13 +726,16 @@
   const dc = 'http://purl.org/dc/elements/1.1/';
   const xmp = 'http://ns.adobe.com/xap/1.0/';
   const custom = 'urn:local:x-media-downloader:1.0';
+  const pixivXmp = 'urn:local:x-media-downloader:pixiv:1.0';
   const jpegXmp = 'http://ns.adobe.com/xap/1.0/\0';
   const jpegExtendedXmp = 'http://ns.adobe.com/xmp/extension/\0';
   const pngXmp = 'XML:com.adobe.xmp';
   const xmlSafe = value => value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]|[\ud800-\udfff]/gu, '\ufffd');
+  const escapeXml = value => xmlSafe(string(value)).replace(/[&<>"']/g, char =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]);
   const ascii = (bytes, offset, length) => String.fromCharCode(...bytes.subarray(offset, offset + length));
 
-  function xmpPacket(metadata, previous = '') {
+  function xmpPacket(metadata, previous = '', preserve = false) {
     const doc = new DOMParser().parseFromString(previous ||
       '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="' + rdf + '"/></x:xmpmeta>', 'application/xml');
     const container = doc.getElementsByTagNameNS(rdf, 'RDF')[0];
@@ -733,6 +747,9 @@
     container.append(record);
 
     function add(namespace, prefix, key, value, collection) {
+      const hasProperty = description => description.hasAttributeNS(namespace, key) ||
+        [...description.children].some(node => node.namespaceURI === namespace && node.localName === key);
+      if (preserve && namespace !== pixivXmp && descriptions.some(hasProperty)) return;
       for (const description of descriptions) {
         description.removeAttributeNS(namespace, key);
         for (const property of [...description.children]) {
@@ -746,10 +763,12 @@
         return;
       }
       const list = doc.createElementNS(rdf, 'rdf:' + collection);
-      const entry = doc.createElementNS(rdf, 'rdf:li');
-      if (collection === 'Alt') entry.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', 'x-default');
-      entry.textContent = xmlSafe(value);
-      list.append(entry);
+      for (const text of collection === 'Bag' ? value.split('\n').filter(Boolean) : [value]) {
+        const entry = doc.createElementNS(rdf, 'rdf:li');
+        if (collection === 'Alt') entry.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', 'x-default');
+        entry.textContent = xmlSafe(text);
+        list.append(entry);
+      }
       property.append(list);
     }
 
@@ -760,17 +779,18 @@
     };
     for (const [key, value] of Object.entries(metadata)) {
       if (!value) continue;
-      const mapping = Object.hasOwn(standard, key) ? standard[key] : null;
+      const mapping = preserve && key === 'tags' ? [dc, 'dc', 'subject', 'Bag']
+        : Object.hasOwn(standard, key) ? standard[key] : null;
       if (mapping && (key !== 'created' || /^\d{4}-\d{2}-\d{2}T/.test(value))) {
         const [namespace, prefix, property, collection] = mapping;
         add(namespace, prefix, property, value, collection);
       }
-      add(custom, 'xmd', key, value);
+      add(preserve ? pixivXmp : custom, preserve ? 'pixiv' : 'xmd', key, value);
     }
     return encoder.encode(new XMLSerializer().serializeToString(doc));
   }
 
-  function jpegWithXmp(bytes, metadata) {
+  function jpegWithXmp(bytes, metadata, preserve) {
     const view = new DataView(bytes.buffer);
     let offset = 2;
     let insert = 2;
@@ -796,7 +816,7 @@
       }
       offset = end;
     }
-    const payload = xmpPacket(metadata, previous);
+    const payload = xmpPacket(metadata, previous, preserve);
     const header = encoder.encode(jpegXmp);
     const size = 2 + header.length + payload.length;
     if (size > 65535) throw new Error('XMP 超过 JPEG APP1 容量');
@@ -811,15 +831,19 @@
     return crc;
   });
 
+  function crc32(bytes) {
+    let crc = 0xffffffff;
+    for (const byte of bytes) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 255];
+    return crc ^ 0xffffffff;
+  }
+
   function pngChunk(type, data) {
     const chunk = new Uint8Array(data.length + 12);
     const view = new DataView(chunk.buffer);
     view.setUint32(0, data.length);
     chunk.set(encoder.encode(type), 4);
     chunk.set(data, 8);
-    let crc = 0xffffffff;
-    for (const byte of chunk.subarray(4, chunk.length - 4)) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 255];
-    view.setUint32(chunk.length - 4, crc ^ 0xffffffff);
+    view.setUint32(chunk.length - 4, crc32(chunk.subarray(4, -4)));
     return chunk;
   }
 
@@ -839,7 +863,7 @@
     return new Response(stream).text();
   }
 
-  async function pngWithXmp(bytes, metadata) {
+  async function pngWithXmp(bytes, metadata, preserve) {
     const view = new DataView(bytes.buffer);
     let offset = 8;
     let previous = '';
@@ -851,7 +875,7 @@
       if (end > bytes.length) break;
       if (type === 'IEND') {
         const header = encoder.encode(pngXmp + '\0\0\0\0\0');
-        const xml = xmpPacket(metadata, previous);
+        const xml = xmpPacket(metadata, previous, preserve);
         const content = new Uint8Array(header.length + xml.length);
         content.set(header, 0);
         content.set(xml, header.length);
@@ -859,7 +883,12 @@
         const [start, finish] = replace || [offset, offset];
         return new Blob([bytes.subarray(0, start), chunk, bytes.subarray(finish)], { type: 'image/png' });
       }
-      if (type === 'iTXt' && size > pngXmp.length + 4 && ascii(bytes, offset + 8, pngXmp.length + 1) === pngXmp + '\0') {
+      const hasXmpKeyword = size > pngXmp.length && ['iTXt', 'tEXt', 'zTXt'].includes(type) &&
+        ascii(bytes, offset + 8, pngXmp.length + 1) === pngXmp + '\0';
+      if (preserve && hasXmpKeyword && (type !== 'iTXt' || size <= pngXmp.length + 4)) {
+        throw new Error('PNG 已有非标准 XMP 文本块');
+      }
+      if (type === 'iTXt' && hasXmpKeyword && size > pngXmp.length + 4) {
         if (replace) throw new Error('图片含多个 XMP 段');
         replace = [offset, end];
         previous = await readPngXmp(bytes.subarray(offset + 8, end - 4));
@@ -877,7 +906,7 @@
     return chunk;
   }
 
-  function webpWithXmp(bytes, metadata) {
+  function webpWithXmp(bytes, metadata, preserve) {
     const view = new DataView(bytes.buffer);
     const limit = view.getUint32(4, true) + 8;
     if (limit !== bytes.length) throw new Error('WebP RIFF 长度无效');
@@ -924,7 +953,7 @@
       if (alpha) extended[0] |= 0x10;
     }
     extended[0] |= 0x04;
-    const parts = [webpChunk('VP8X', extended), ...chunks, webpChunk('XMP ', xmpPacket(metadata, previous))];
+    const parts = [webpChunk('VP8X', extended), ...chunks, webpChunk('XMP ', xmpPacket(metadata, previous, preserve))];
     const header = bytes.slice(0, 12);
     new DataView(header.buffer).setUint32(4, 4 + parts.reduce((total, part) => total + part.length, 0), true);
     return new Blob([header, ...parts], { type: 'image/webp' });
@@ -943,7 +972,7 @@
     let failure;
     for (const url of urls) {
       try {
-        const blob = await request(url, 'blob', 60000);
+        const blob = await request(url, 'blob', 60000, item.headers);
         const bytes = new Uint8Array(await blob.arrayBuffer());
         const format = imageFormat(bytes);
         if (!format) throw new Error('媒体服务器未返回可识别的图片');
@@ -956,11 +985,11 @@
     throw failure || new Error('没有可用的图片地址');
   }
 
-  async function embedPhoto(photo, metadata) {
+  async function embedPhoto(photo, metadata, preserve) {
     switch (photo.source.ext) {
-      case 'jpg': return jpegWithXmp(photo.bytes, metadata);
-      case 'png': return pngWithXmp(photo.bytes, metadata);
-      case 'webp': return webpWithXmp(photo.bytes, metadata);
+      case 'jpg': return jpegWithXmp(photo.bytes, metadata, preserve);
+      case 'png': return pngWithXmp(photo.bytes, metadata, preserve);
+      case 'webp': return webpWithXmp(photo.bytes, metadata, preserve);
       default: throw new Error('此图片格式使用 JSON 元数据');
     }
   }
@@ -1049,12 +1078,26 @@
       [key, render(value, values, settings.missing)]));
   }
 
+  async function photoOutput(photo, values, settings) {
+    const mode = settings.metadataMode;
+    const sidecar = ['json', 'both'].includes(mode);
+    if (!['auto', 'both'].includes(mode)) return { payload: photo.blob, sidecar };
+    try {
+      return { payload: await embedPhoto(photo, renderMetadata(values, settings), values.platform === 'Pixiv'), sidecar };
+    } catch (error) {
+      return { payload: photo.blob, sidecar: true, reason: error.message };
+    }
+  }
+
+  const metadataBlob = metadata => new Blob([JSON.stringify(metadata, null, 2) + '\n'], { type: 'application/json' });
+
   async function saveMedia(job, outer, settings, handle, paths) {
     const { post, layer, item, position } = job;
+    if (item.kind === 'novel') return savePixivNovel(post, settings, handle);
     let source = item.kind === 'photo'
       ? item.source ? settings.original ? item.source : { ...item.source, url: item.photo }
         : photoSource(item.photo, settings.original)
-      : videoSource(item, settings.quality);
+      : item.ugoira ? item.source : videoSource(item, settings.quality);
     if (!source) throw new Error('未取得可下载的视频文件地址');
     const photo = item.kind === 'photo' ? await preparePhoto(item, source) : null;
     if (photo) source = photo.source;
@@ -1062,24 +1105,23 @@
     const path = uniquePath(filePath(values, settings), candidate => paths.has(candidate.toLowerCase()));
     paths.add(path.toLowerCase());
     values.filename = filenameOf(path);
-    let payload = photo?.blob || source.url;
-    let sidecar = photo ? ['json', 'both'].includes(settings.metadataMode) : settings.videoJson;
+    const output = photo ? await photoOutput(photo, values, settings) : null;
+    const payload = output?.payload || (item.ugoira ? await request(source.url, 'blob', 300000, item.headers) : source.url);
+    if (item.ugoira && ascii(new Uint8Array(await payload.slice(0, 4).arrayBuffer()), 0, 4) !== 'PK\x03\x04') {
+      throw new Error('Pixiv 未返回有效的动图 ZIP');
+    }
+    const sidecar = output ? output.sidecar : settings.videoJson || item.ugoira;
     let metadataNotice = '';
-    if (photo && ['auto', 'both'].includes(settings.metadataMode)) {
-      try {
-        payload = await embedPhoto(photo, renderMetadata(values, settings));
-      } catch (error) {
-        sidecar = true;
-        if (!['gif', 'avif'].includes(source.ext)) metadataNotice = values.filename + ' 的 XMP 已改存 JSON（' + error.message + '）';
-      }
+    if (output?.reason && !['gif', 'avif'].includes(source.ext)) {
+      metadataNotice = values.filename + ' 的 XMP 已改存 JSON（' + output.reason + '）';
     }
     const media = await saveFile(payload, path, settings, handle);
     if (sidecar) {
       values.filename = filenameOf(media.path);
-      const json = new Blob([JSON.stringify(renderMetadata(values, settings), null, 2) + '\n'],
-        { type: 'application/json' });
+      const metadata = renderMetadata(values, settings);
+      if (item.ugoira) metadata.frames = item.ugoira;
       try {
-        await saveFile(json, media.path + '.json', settings, handle);
+        await saveFile(metadataBlob(metadata), media.path + '.json', settings, handle);
       } catch (error) {
         metadataNotice = values.filename + ' 的 JSON 元数据保存失败（' + error.message + '）';
       }
@@ -1098,6 +1140,8 @@
       '.xmd-download svg{width:1.18em;height:1.18em;flex:none;fill:currentColor}',
       '.xmd-download:hover,.xmd-download:focus-visible{color:#1d9bf0;background:rgba(29,155,240,.12)}',
       '.xmd-download:disabled{cursor:progress;opacity:.55}',
+      '.xmd-download.xmd-pixiv-download{position:fixed;right:16px;bottom:24px;z-index:9990;width:40px;height:40px;color:#0075c2;background:#fff;box-shadow:0 1px 6px #0003}',
+      '.xmd-download.xmd-pixiv-download:hover,.xmd-download.xmd-pixiv-download:focus-visible{background:#e8f6ff}',
       '.xmd-dialog,.xmd-toast{box-sizing:border-box;font:14px/1.45 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:#0f1419;background:#fff;border:1px solid #cfd9de;border-radius:16px}',
       '.xmd-dark{background:#15202b;color:#f7f9f9;border-color:#536471;color-scheme:dark}',
       '.xmd-dialog{width:min(680px,calc(100vw - 28px));max-height:calc(100vh - 40px);padding:0;overscroll-behavior:contain}',
@@ -1297,13 +1341,13 @@
     queue = queue.then(async () => {
       const { handle, error } = await directoryPromise;
       if (error) throw error;
-      if (settings.feedback) notify('正在读取帖子媒体…', [], true);
+      if (settings.feedback) notify(site === 'pixiv' ? '正在读取 Pixiv 作品…' : '正在读取帖子媒体…', [], true);
       const { posts, warnings } = await resolve();
       if (handle && directorySaveFailed) warnings.push('浏览器未能记住所选文件夹，重新打开页面后需再选。');
       const jobs = posts.flatMap((post, layer) => post.media.map((item, position) =>
         ({ post, layer, item, position })).filter(({ item }) => settings[item.kind]));
       if (!jobs.length) {
-        notify('未找到符合设置的图片或视频', warnings);
+        notify(site === 'pixiv' ? '未找到符合设置的 Pixiv 作品' : '未找到符合设置的图片或视频', warnings);
         return;
       }
       let saved = 0;
@@ -1390,6 +1434,10 @@
     if (scanFrame || !document.body) return;
     scanFrame = requestAnimationFrame(() => {
       scanFrame = 0;
+      if (site === 'pixiv') {
+        scanPixiv();
+        return;
+      }
       const settings = options();
       if (site !== 'x') {
         scanOtherSite();
@@ -1540,7 +1588,12 @@
       ['both', '图片写入 XMP，同时保存图片 JSON'],
       ['json', '仅保存图片 JSON'], ['off', '关闭图片元数据'],
     ]);
-    if (site !== 'bili') {
+    if (site === 'pixiv') {
+      const animation = mediaGroup('动图', 'gif', '下载 Pixiv 动图', ['ZIP', 'JSON']);
+      animation.append(element('small', '下载 Pixiv 提供的帧文件 ZIP 和记录每帧时长的 JSON。'));
+      const novels = mediaGroup('小说', 'novel', '下载 Pixiv 小说', ['EPUB', 'TXT']);
+      field(novels, 'novelFormat', '小说格式', 'select', [['epub', 'EPUB'], ['txt', 'TXT（UTF-8）']]);
+    } else if (site !== 'bili') {
       const videos = mediaGroup('视频', 'video', '下载视频', ['MP4']);
       if (site === 'x') {
         const gifs = mediaGroup('动图', 'gif', '下载 X 动图', ['MP4']);
@@ -1584,6 +1637,7 @@
     const metadata = optionGroup(form, '元数据字段与模板');
     field(metadata, 'metadata', '字段模板（JSON）', 'textarea');
     metadata.append(element('small', '每行设置字段名与模板，例如 "description": "%posttext%"。可删除或新增字段。title、creator、description、source、identifier、created 同时映射到标准 XMP 字段。'));
+    if (site === 'pixiv') metadata.append(element('small', 'Pixiv 字段写入独立的 XMP 命名空间。仅在缺少对应标准字段时补写，包括标签字段。'));
     const reference = element('details');
     const legend = element('dl');
     for (const [key, description] of Object.entries(fields)) {
@@ -1599,6 +1653,7 @@
       x: '时间线和图片查看器：下载按钮位于分享按钮旁。右键下载按钮可打开设置。',
       bili: '动态列表：下载按钮位于操作栏。图文详情：下载按钮位于侧边工具栏。右键下载按钮可打开设置。',
       xhs: '笔记详情：下载按钮位于分享按钮旁。图片预览：带 all 标记的按钮下载整篇笔记。右键下载按钮可打开设置。',
+      pixiv: '作品和小说详情页：下载按钮位于页面右下角。右键下载按钮可打开设置。',
     }[site]));
     ui.append(element('small', '本页设置仅对 ' + siteNames[site] + ' 生效。其他平台的设置单独保存。'));
     if (site === 'x') field(ui, 'button', '显示下载按钮', 'select', [
@@ -1632,7 +1687,8 @@
 
     function refreshPreview() {
       const current = options();
-      controls.metadata.label.hidden = mode.value === 'off' && !controls.videoJson?.input.checked;
+      controls.metadata.label.hidden = mode.value === 'off' && !controls.videoJson?.input.checked &&
+        !(site === 'pixiv' && controls.gif.input.checked);
       const demo = { ...Object.fromEntries(Object.keys(fields).map(key => [key, ''])),
         date: '2026-11-10', time: '164000', handle: 'labrin', at: '@labrin', author: 'Labrin',
         postid: '1987654321000000000', sourceid: '1987654321000000000', medianame: 'ExampleImage',
@@ -1671,7 +1727,7 @@
       saveSettings(Object.fromEntries(Object.keys(controls).map(key => [key, defaults[key]])));
       for (const [key, { input, type, error }] of Object.entries(controls)) {
         if (type === 'checkbox') input.checked = defaults[key];
-        else input.value = type === 'textarea' ? JSON.stringify(defaultMetadata, null, 2) : defaults[key];
+        else input.value = type === 'textarea' ? JSON.stringify(defaults.metadata, null, 2) : defaults[key];
         error.hidden = true;
       }
       updateDirectory();
@@ -1713,6 +1769,337 @@
   const inDomain = (host, domain) => host === domain || host.endsWith('.' + domain);
   const noteId = path => path?.match(/\/(?:explore|discovery\/item|user\/profile\/[a-f0-9]{24})\/([a-f0-9]{24})(?:\/|$)/i)?.[1] || '';
   const biliOpusUrl = id => 'https://www.bilibili.com/opus/' + id;
+
+  const pixivOrigin = 'https://www.pixiv.net';
+  const pixivHeaders = { Referer: pixivOrigin + '/' };
+  const pixivUrl = (type, id) => pixivOrigin + (type === 'novel' ? '/novel/show.php?id=' : '/artworks/') + id;
+  function pixivRoute(url) {
+    if (url.hostname !== 'www.pixiv.net') return null;
+    const artwork = url.pathname.match(/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?artworks\/([0-9]+)\/?$/i);
+    if (artwork) return { type: 'illust', id: artwork[1] };
+    const id = url.searchParams.get('id') || '';
+    return url.pathname === '/novel/show.php' && /^[0-9]+$/.test(id) ? { type: 'novel', id } : null;
+  }
+
+  async function pixivData(type, id, endpoint = '') {
+    const response = await page.fetch('/ajax/' + type + '/' + id + endpoint, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error('Pixiv HTTP ' + response.status);
+    const data = await response.json();
+    if (data.error || !data.body) throw new Error(data.message || 'Pixiv 未返回作品数据');
+    return data.body;
+  }
+
+  function pixivPhoto(urls, alt = '', imageRole = '') {
+    const original = allowedAsset(urls?.original, 'pximg.net');
+    const regular = allowedAsset(urls?.regular, 'pximg.net');
+    const url = original || regular;
+    if (!url) throw new Error('Pixiv 未提供图片地址');
+    const [id, ext] = url.pathname.split('/').at(-1).match(/^(.+)\.([a-z0-9]+)$/i)?.slice(1) || [];
+    if (!id) throw new Error('Pixiv 图片文件名无效');
+    return { kind: 'photo', id, photo: (regular || url).href, source: { url: url.href, ext },
+      alt, imageRole, headers: pixivHeaders };
+  }
+
+  async function resolvePixiv({ id, type }, settings) {
+    const data = await pixivData(type, id);
+    const description = new DOMParser().parseFromString(string(data.description).replace(/<br\s*\/?>/gi, '\n'), 'text/html');
+    const post = {
+      id, platform: 'pixiv', url: pixivUrl(type, id), author: string(data.userName), authorId: string(data.userId),
+      handle: string(data.userAccount), title: string(data.title), text: description.body.textContent.trim(),
+      textComplete: true, time: published(data.createDate),
+      tags: [...new Set((data.tags?.tags || []).map(entry => entry.tag).filter(Boolean))],
+      workType: type === 'novel' ? 'novel' : Number(data.illustType) === 2 ? 'ugoira'
+        : Number(data.illustType) === 1 ? 'manga' : 'illustration',
+      media: [],
+    };
+    if (type === 'novel') {
+      if (typeof data.content !== 'string' || !data.content.trim()) throw new Error('Pixiv 未返回小说正文');
+      post.novel = data;
+      post.media = [{ kind: 'novel', id: 'novel-' + id }];
+    } else if (post.workType === 'ugoira') {
+      if (settings.gif) {
+        const animation = await pixivData(type, id, '/ugoira_meta');
+        const url = allowedAsset(animation.originalSrc, 'pximg.net') || allowedAsset(animation.src, 'pximg.net');
+        if (!url || !/\.zip$/i.test(url.pathname) || !Array.isArray(animation.frames) || !animation.frames.length ||
+            animation.frames.some(frame => typeof frame.file !== 'string' || !Number.isFinite(frame.delay))) {
+          throw new Error('Pixiv 未提供完整的动图帧或帧时长');
+        }
+        post.media = [{ kind: 'gif', id: url.pathname.split('/').at(-1).slice(0, -4), source: { url: url.href, ext: 'zip' },
+          ugoira: animation.frames.map(({ file, delay }) => ({ file, delay })), headers: pixivHeaders }];
+      }
+    } else if (settings.photo) {
+      const pages = Number(data.pageCount) > 1 ? await pixivData(type, id, '/pages') : [data];
+      if (!Array.isArray(pages) || !pages.length) throw new Error('Pixiv 未提供作品图片');
+      post.media = pages.map((entry, index) => pixivPhoto(entry.urls, index === 0 ? string(data.alt) : ''));
+    }
+    return { posts: [post], warnings: [] };
+  }
+
+  function novelTokens(content) {
+    const pattern = /\[(?:(uploadedimage|pixivimage|chapter|jump|b|i):([^\]\n]+)|(newpage))\]|\[\[(rb|jumpuri|emphasismark):([^\]\n]+?)\s*>\s*([^\]\n]+)\]\]/g;
+    const result = [];
+    let offset = 0;
+    for (const match of content.matchAll(pattern)) {
+      if (offset < match.index) result.push({ type: 'text', value: content.slice(offset, match.index) });
+      result.push({ type: match[1] || match[3] || match[4], value: match[2] || match[5] || '', extra: match[6] || '' });
+      offset = match.index + match[0].length;
+    }
+    if (offset < content.length) result.push({ type: 'text', value: content.slice(offset) });
+    return result;
+  }
+
+  function novelBody(tokens, images, asHtml) {
+    const chapters = [];
+    const pageCount = 1 + tokens.filter(token => token.type === 'newpage').length;
+    let pageNumber = 1;
+    const paragraphs = [];
+    let paragraph = '';
+    const flush = () => {
+      if (paragraph.trim()) paragraphs.push('<p>' + paragraph + '</p>');
+      paragraph = '';
+    };
+    const text = [];
+    for (const { type, value, extra } of tokens) {
+      const words = escapeXml(value);
+      if (type === 'text') {
+        if (asHtml) {
+          const lines = words.split(/\r?\n/);
+          paragraph += lines[0];
+          for (const line of lines.slice(1)) {
+            flush();
+            paragraph = line;
+          }
+        } else text.push(value);
+      } else if (type === 'chapter' || type === 'newpage') {
+        if (asHtml) {
+          flush();
+          if (type === 'chapter') {
+            const id = 'chapter-' + (chapters.length + 1);
+            chapters.push({ id, title: value });
+            paragraphs.push('<h2 id="' + id + '">' + words + '</h2>');
+          } else paragraphs.push('<div class="newpage" id="page-' + ++pageNumber + '"></div>');
+        } else text.push(type === 'chapter' ? '\n\n' + value + '\n' : '\n\n');
+      } else if (type === 'uploadedimage' || type === 'pixivimage') {
+        const image = images.get(type + ':' + value);
+        const label = '插图 ' + value;
+        if (asHtml) {
+          flush();
+          paragraphs.push(image ? '<figure><img src="' + escapeXml(image) + '" alt="' + escapeXml(label) + '"/></figure>'
+            : '<p>' + escapeXml(label + '（未取得）') + '</p>');
+        } else text.push('\n[' + label + '：' + (image || '未取得') + ']\n');
+      } else if (type === 'jumpuri') {
+        let url;
+        try { url = new URL(extra.trim()); } catch { /* Keep the link text. */ }
+        if (url && !['https:', 'http:'].includes(url.protocol)) url = null;
+        if (asHtml) paragraph += url ? '<a href="' + escapeXml(url.href) + '">' + words + '</a>' : words;
+        else text.push(value + (url ? ' (' + url.href + ')' : ''));
+      } else if (type === 'jump') {
+        const number = Number(value);
+        const label = '第 ' + value + ' 页';
+        if (asHtml) paragraph += Number.isInteger(number) && number >= 1 && number <= pageCount ?
+          '<a href="#page-' + number + '">' + escapeXml(label) + '</a>' : escapeXml(label);
+        else text.push(label);
+      } else if (type === 'rb') {
+        if (asHtml) paragraph += '<ruby>' + words + '<rp>（</rp><rt>' + escapeXml(extra) + '</rt><rp>）</rp></ruby>';
+        else text.push(value + '（' + extra + '）');
+      } else {
+        if (asHtml) paragraph += type === 'b' ? '<strong>' + words + '</strong>'
+          : type === 'i' ? '<em>' + words + '</em>'
+            : '<span style="text-emphasis-style:&quot;' + escapeXml(extra.trim().slice(0, 2).replace(/["\\;]/g, '')) +
+              '&quot;">' + words + '</span>';
+        else text.push(value);
+      }
+    }
+    flush();
+    return { chapters, content: asHtml ? paragraphs.join('\n') : text.join('') };
+  }
+
+  // EPUB requires the first ZIP entry to be stored without compression or extra fields.
+  async function epubZip(entries) {
+    const files = [];
+    const directory = [];
+    let offset = 0;
+    let directorySize = 0;
+    for (const [path, payload] of entries) {
+      const name = encoder.encode(path);
+      const bytes = typeof payload === 'string' ? encoder.encode(payload) : new Uint8Array(await payload.arrayBuffer());
+      const local = new Uint8Array(30 + name.length);
+      const header = new DataView(local.buffer);
+      header.setUint32(0, 0x04034b50, true);
+      header.setUint16(4, 20, true);
+      header.setUint16(6, 0x0800, true);
+      header.setUint16(12, 33, true);
+      header.setUint32(14, crc32(bytes), true);
+      header.setUint32(18, bytes.length, true);
+      header.setUint32(22, bytes.length, true);
+      header.setUint16(26, name.length, true);
+      local.set(name, 30);
+      const central = new Uint8Array(46 + name.length);
+      const record = new DataView(central.buffer);
+      record.setUint32(0, 0x02014b50, true);
+      record.setUint16(4, 20, true);
+      central.set(local.subarray(4, 30), 6);
+      record.setUint32(42, offset, true);
+      central.set(name, 46);
+      files.push(local, bytes);
+      directory.push(central);
+      offset += local.length + bytes.length;
+      directorySize += central.length;
+    }
+    if (directory.length >= 65535 || offset + directorySize >= 0xffffffff) throw new Error('EPUB 超出 ZIP 容量');
+    const end = new Uint8Array(22);
+    const footer = new DataView(end.buffer);
+    footer.setUint32(0, 0x06054b50, true);
+    footer.setUint16(8, directory.length, true);
+    footer.setUint16(10, directory.length, true);
+    footer.setUint32(12, directorySize, true);
+    footer.setUint32(16, offset, true);
+    return new Blob([...files, ...directory, end], { type: 'application/epub+zip' });
+  }
+
+  function pixivEpub(post, tokens, images, assets, cover) {
+    const { content, chapters } = novelBody(tokens, images, true);
+    const title = escapeXml(post.title);
+    const language = escapeXml(post.novel.language || 'und');
+    const xhtml = (body, style = '') => '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="' + language +
+      '" lang="' + language + '"><head><title>' + title + '</title>' + style + '</head><body>' + body + '</body></html>';
+    const nav = chapters.length ? chapters : [{ id: 'page-1', title: post.title }];
+    const metadata = [['title', post.title], ['creator', post.author], ['description', post.text],
+      ['source', post.url], ['date', post.time], ...post.tags.map(tag => ['subject', tag])]
+      .filter(([, value]) => value).map(([key, value]) => '<dc:' + key + '>' + escapeXml(value) + '</dc:' + key + '>').join('');
+    const modified = (published(post.novel.uploadDate) || post.time || new Date().toISOString()).replace(/\.\d+Z$/, 'Z');
+    const manifest = assets.map(({ path, mime }, index) => '<item id="image-' + (index + 1) + '" href="' + escapeXml(path) +
+      '" media-type="' + mime + '"' + (path === cover ? ' properties="cover-image"' : '') + '/>').join('');
+    return epubZip([
+      ['mimetype', 'application/epub+zip'],
+      ['META-INF/container.xml', '<?xml version="1.0" encoding="UTF-8"?>' +
+        '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles>' +
+        '<rootfile full-path="EPUB/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'],
+      ['EPUB/book.opf', '<?xml version="1.0" encoding="UTF-8"?>' +
+        '<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="3.0">' +
+        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">' + escapeXml(post.url) +
+        '</dc:identifier><dc:language>' + language + '</dc:language>' + metadata +
+        '<meta property="dcterms:modified">' + modified + '</meta></metadata><manifest>' +
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' +
+        '<item id="story" href="story.xhtml" media-type="application/xhtml+xml"/>' + manifest +
+        '</manifest><spine><itemref idref="story"/></spine></package>'],
+      ['EPUB/nav.xhtml', xhtml('<nav epub:type="toc" id="toc"><h1>' + title + '</h1><ol>' +
+        nav.map(entry => '<li><a href="story.xhtml#' + entry.id + '">' + escapeXml(entry.title) + '</a></li>').join('') +
+        '</ol></nav>')],
+      ['EPUB/story.xhtml', xhtml((cover ? '<figure><img src="' + escapeXml(cover) + '" alt="封面"/></figure>' : '') +
+        '<h1 id="page-1">' + title + '</h1>' + content,
+        '<style>img{max-width:100%;height:auto}p{white-space:pre-wrap}.newpage{break-before:page;page-break-before:always}</style>')],
+      ...assets.flatMap(asset => [['EPUB/' + asset.path, asset.payload], ...(asset.sidecar
+        ? [['META-INF/pixiv/' + asset.path.split('/').at(-1) + '.json', metadataBlob(asset.metadata)]] : [])]),
+    ]);
+  }
+
+  async function savePixivNovel(post, settings, handle) {
+    const format = settings.novelFormat === 'txt' ? 'txt' : 'epub';
+    const ebook = format === 'epub';
+    const novel = post.novel;
+    const tokens = novelTokens(novel.content);
+    const references = new Map();
+    if (novel.coverUrl) references.set('cover', { type: 'cover', value: '' });
+    for (const token of tokens) {
+      if (token.type === 'uploadedimage' || token.type === 'pixivimage') {
+        references.set(token.type + ':' + token.value, token);
+      }
+    }
+    const source = { url: post.url, ext: format };
+    const values = contextFor(post, post, 0, post.media[0], source, 0, settings);
+    const path = filePath(values, settings);
+    const images = new Map();
+    const assets = [];
+    const warnings = [];
+    const artworkPages = new Map();
+    let index = 0;
+    for (const [key, { type, value }] of references) {
+      index++;
+      try {
+        let urls;
+        if (type === 'cover') urls = { regular: novel.coverUrl };
+        else if (type === 'uploadedimage' && /^\d+$/.test(value)) urls = novel.textEmbeddedImages?.[value]?.urls;
+        else if (type === 'pixivimage') {
+          const match = value.match(/^(\d+)(?:-([1-9]\d*))?$/);
+          if (match) {
+            const [, id, pageNumber = '1'] = match;
+            if (!artworkPages.has(id)) artworkPages.set(id, pixivData('illust', id, '/pages'));
+            const pages = await artworkPages.get(id);
+            urls = pages[Number(pageNumber) - 1]?.urls;
+          }
+        }
+        const item = pixivPhoto(urls, '', type === 'cover' ? 'cover' : 'illustration');
+        const photo = await preparePhoto(item, settings.original ? item.source : { ...item.source, url: item.photo });
+        const metadataValues = contextFor({ ...post, media: [item] }, post, 0, item, photo.source, 0, settings);
+        Object.assign(metadataValues, { index, assetindex: index, mediaindex: index, photoindex: index, total: references.size,
+          mediatotal: references.size, photototal: references.size, index2: String(index).padStart(2, '0') });
+        const imagePath = ebook ? 'images/' + index + '.' + photo.source.ext
+          : path.slice(0, -4) + '_' + item.imageRole + '-' + index + '.' + photo.source.ext;
+        metadataValues.filename = filenameOf(imagePath);
+        const output = await photoOutput(photo, metadataValues, settings);
+        if (ebook && !['jpg', 'png', 'gif', 'webp'].includes(photo.source.ext)) throw new Error('EPUB 不支持此图片格式');
+        if (ebook) {
+          assets.push({ path: imagePath, payload: output.payload, mime: photo.blob.type,
+            sidecar: output.sidecar, metadata: renderMetadata(metadataValues, settings) });
+          images.set(key, imagePath);
+        } else {
+          const saved = await saveFile(output.payload, imagePath, settings, handle);
+          metadataValues.filename = filenameOf(saved.path);
+          images.set(key, metadataValues.filename);
+          if (output.sidecar) await saveFile(metadataBlob(renderMetadata(metadataValues, settings)), saved.path + '.json', settings, handle);
+        }
+        if (output.reason) warnings.push(key + ' 的 XMP 已改存 JSON（' + output.reason + '）');
+      } catch (error) {
+        warnings.push(key + '：' + error.message);
+      }
+    }
+    const cover = images.get('cover');
+    const payload = ebook ? await pixivEpub(post, tokens, images, assets, cover)
+      : new Blob([[post.title, '作者：' + post.author, '来源：' + post.url,
+        ...(post.time ? ['发布日期：' + post.time] : []),
+        ...(post.tags.length ? ['标签：' + post.tags.join('、')] : []),
+        ...(cover ? ['封面：' + cover] : []), ...(post.text ? ['', post.text] : []),
+        '', novelBody(tokens, images, false).content].join('\n') + '\n'], { type: 'text/plain;charset=utf-8' });
+    const saved = await saveFile(payload, path, settings, handle);
+    return { state: saved.state, warning: warnings.join('\n') };
+  }
+
+  function scanPixiv() {
+    const route = pixivRoute(new URL(location.href));
+    const existing = document.querySelector('.xmd-pixiv-download');
+    if (!route) {
+      existing?.remove();
+      return;
+    }
+    const key = route.type + ':' + route.id;
+    if (existing?.dataset.work === key) return;
+    existing?.remove();
+    const button = element('button');
+    button.type = 'button';
+    button.className = BUTTON + ' xmd-pixiv-download';
+    button.dataset.work = key;
+    const label = route.type === 'novel' ? '下载 Pixiv 小说' : '下载 Pixiv 作品';
+    button.title = label + '（右键打开设置）';
+    button.setAttribute('aria-label', label);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const icon = document.createElementNS(svg.namespaceURI, 'path');
+    icon.setAttribute('d', viewerArrow + tray);
+    svg.append(icon);
+    button.append(svg);
+    button.addEventListener('click', () => {
+      const settings = options();
+      enqueueDownload('pixiv:' + key, button, settings, () => resolvePixiv(route, settings));
+    });
+    button.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      openSettings();
+    });
+    document.body.append(button);
+  }
   const biliId = url => {
     const parsed = asUrl(url);
     if (!parsed || !inDomain(parsed.hostname, 'bilibili.com')) return '';
@@ -1723,6 +2110,8 @@
   function cleanLink(value, forNavigation = false) {
     const url = asUrl(value);
     if (url?.protocol !== 'https:' || url.username || url.password || url.port) return null;
+    const pixiv = pixivRoute(url);
+    if (pixiv) return new URL(pixivUrl(pixiv.type, pixiv.id));
     if (inDomain(url.hostname, 'xiaohongshu.com')) {
       const id = noteId(url.pathname);
       if (!id && !/^\/(?:explore|search_result|user\/profile\/[a-f0-9]{24})\/?$/i.test(url.pathname)) return null;
@@ -2326,7 +2715,7 @@
     }
   }
 
-  try { watchPageResponses(site === 'x' ? xApi : otherApi, site === 'x' ? captureJson : captureOther); }
+  try { if (site !== 'pixiv') watchPageResponses(site === 'x' ? xApi : otherApi, site === 'x' ? captureJson : captureOther); }
   catch (error) { console.debug('[聚合媒体下载]', error); }
   GM_registerMenuCommand(menu, openSettings);
   GM_registerMenuCommand('清理或打开分享链接', openLinkTools);

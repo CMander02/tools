@@ -47,7 +47,7 @@ git pull --ff-only
 
 | 名称 | 文件 | 功能说明 |
 | --- | --- | --- |
-| 聚合媒体下载 | [media-downloader.user.js](tampermonkey/media-downloader.user.js) | 在 X、B 站动态与小红书笔记中下载图片、视频、动图及实况照片，支持分站目录、命名模板与图片 XMP 元数据 |
+| 聚合媒体下载 | [media-downloader.user.js](tampermonkey/media-downloader.user.js) | 在 X、B 站动态、小红书笔记和 Pixiv 下载媒体，支持 Pixiv 小说导出、分站目录、命名模板与图片 XMP 元数据 |
 
 浏览器端脚本统一存放在 [tampermonkey](tampermonkey) 目录，目录约定与安装步骤见 [tampermonkey/README.md](tampermonkey/README.md)。
 
