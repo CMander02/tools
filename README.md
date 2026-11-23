@@ -6,7 +6,7 @@
 
 | 插件 | Skills |
 | --- | --- |
-| [general](plugins/general) | `plain-rigorous-writing`（说人话）、`visualization`（数据与架构可视化） |
+| [general](plugins/general) | `plain-rigorous-writing`（说人话）、`visualization`（数据与架构可视化）、[`sglang-omni-coding-style`](plugins/general/skills/sglang-omni-coding-style/SKILL.md)（Python 编码规范） |
 | [ai-tools](plugins/ai-tools) | `codex`、`gemini-cli`、`roundtable` |
 | [web](plugins/web) | `omni-fetch`、`web-parse`、`xhs-fetch`、`xiaoyuzhou-fetch`、`zhihu-fetch` |
 
